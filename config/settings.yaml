@@ -1,0 +1,31 @@
+# Non-secret application settings. Secrets live in .env (see .env.example).
+# Model IDs are OpenRouter model slugs (https://openrouter.ai/models).
+
+models:
+  main: anthropic/claude-sonnet-5.5
+  judge: google/gemini-3.5-flash
+  fallback: openai/gpt-4.1-mini
+
+llm:
+  base_url: https://openrouter.ai/api/v1
+  timeout_s: 60
+  max_retries: 3
+  temperature: 0.0
+
+paths:
+  raw_dir: data/raw
+  index_dir: data/index
+
+limits:
+  max_question_chars: 2000
+
+retrieval:
+  top_k: 8
+  bm25_weight: 0.5
+  dense_weight: 0.5
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  chunk_size: 1200
+  chunk_overlap: 200
+
+logging:
+  level: INFO
