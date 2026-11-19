@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 from pydantic_settings import (
     BaseSettings,
@@ -128,5 +129,5 @@ def configure_logging(level: str = "INFO") -> None:
     else:
         root.setLevel(numeric)
     # Keep noisy HTTP client logs (which may include URLs/headers) quiet.
-    for noisy in ("httpx", "httpcore", "openai"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
