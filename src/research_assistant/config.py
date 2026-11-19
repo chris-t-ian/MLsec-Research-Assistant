@@ -37,13 +37,33 @@ class LLMConfig(BaseModel):
 class PathsConfig(BaseModel):
     raw_dir: Path = Path("data/raw")
     index_dir: Path = Path("data/index")
+    papers_file: Path = Path("data/papers.yaml")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
+
+        def _abs(p: Path) -> Path:
+            return p if p.is_absolute() else root / p
+
         return PathsConfig(
-            raw_dir=self.raw_dir if self.raw_dir.is_absolute() else root / self.raw_dir,
-            index_dir=self.index_dir if self.index_dir.is_absolute() else root / self.index_dir,
+            raw_dir=_abs(self.raw_dir),
+            index_dir=_abs(self.index_dir),
+            papers_file=_abs(self.papers_file),
         )
+
+
+class ArxivConfig(BaseModel):
+    api_url: str = "https://export.arxiv.org/api/query"
+    eprint_url: str = "https://export.arxiv.org/e-print"
+    pdf_url: str = "https://export.arxiv.org/pdf"
+    # arXiv terms of use: at most one request every 3 seconds. Not configurable below that.
+    min_interval_s: float = Field(default=3.0, ge=3.0)
+    timeout_s: float = Field(default=60.0, gt=0)
+    max_retries: int = Field(default=3, ge=0)
+    backoff_s: float = Field(default=3.0, ge=0)
+    max_download_mb: int = Field(default=100, gt=0)
+    max_extract_mb: int = Field(default=500, gt=0)
+    user_agent: str = "research-assistant-corpus/0.1"
 
 
 class LimitsConfig(BaseModel):
@@ -84,6 +104,7 @@ class Settings(BaseSettings):
     paths: PathsConfig = PathsConfig()
     limits: LimitsConfig = LimitsConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
+    arxiv: ArxivConfig = ArxivConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod

@@ -1,0 +1,204 @@
+# ML security/privacy RAG corpus v1
+# 194 arXiv papers (5 non-arXiv items from the master table are excluded).
+# IDs are quoted so YAML parsers keep them as strings (e.g. "2212.06470" would otherwise lose its trailing zero).
+# Entries marked "# unverified" were not checked on arxiv.org; verify before ingesting.
+
+- {arxiv_id: "1610.05820", topic: membership_inference}  # unverified
+- {arxiv_id: "1709.01604", topic: membership_inference}
+- {arxiv_id: "1806.01246", topic: membership_inference}
+- {arxiv_id: "1908.11229", topic: membership_inference}
+- {arxiv_id: "2112.03570", topic: membership_inference}
+- {arxiv_id: "2111.09679", topic: membership_inference}
+- {arxiv_id: "2111.08440", topic: membership_inference}
+- {arxiv_id: "2312.03262", topic: membership_inference}
+- {arxiv_id: "2307.03694", topic: membership_inference}
+- {arxiv_id: "2005.10881", topic: membership_inference}
+- {arxiv_id: "2005.13702", topic: membership_inference}
+- {arxiv_id: "1802.04889", topic: membership_inference}
+- {arxiv_id: "2206.10469", topic: membership_inference}
+- {arxiv_id: "1906.11798", topic: membership_inference}
+- {arxiv_id: "2007.14321", topic: membership_inference}
+- {arxiv_id: "2007.15528", topic: membership_inference}
+- {arxiv_id: "2003.10595", topic: membership_inference}
+- {arxiv_id: "1909.10594", topic: membership_inference}
+- {arxiv_id: "1807.05852", topic: membership_inference}
+- {arxiv_id: "2110.08324", topic: membership_inference}
+- {arxiv_id: "2207.05801", topic: membership_inference}
+- {arxiv_id: "2404.17399", topic: membership_inference}
+- {arxiv_id: "2103.07853", topic: membership_inference}
+- {arxiv_id: "2603.22987", topic: membership_inference}
+- {arxiv_id: "2402.07841", topic: membership_inference}
+- {arxiv_id: "2406.16201", topic: membership_inference}
+- {arxiv_id: "2406.17975", topic: membership_inference}
+- {arxiv_id: "2505.18773", topic: membership_inference}
+- {arxiv_id: "2411.00154", topic: membership_inference}
+- {arxiv_id: "2409.19798", topic: membership_inference}
+- {arxiv_id: "2310.16789", topic: membership_inference}
+- {arxiv_id: "2404.02936", topic: membership_inference}
+- {arxiv_id: "2104.10706", topic: membership_inference}  # unverified
+- {arxiv_id: "2406.06443", topic: membership_inference}
+- {arxiv_id: "2310.15007", topic: membership_inference}
+- {arxiv_id: "2402.09363", topic: membership_inference}
+- {arxiv_id: "2405.15523", topic: membership_inference}
+- {arxiv_id: "2305.18462", topic: membership_inference}
+- {arxiv_id: "2203.03929", topic: membership_inference}
+- {arxiv_id: "2205.12506", topic: membership_inference}
+- {arxiv_id: "2311.06062", topic: membership_inference}
+- {arxiv_id: "2310.09266", topic: membership_inference}
+- {arxiv_id: "1705.07663", topic: membership_inference}
+- {arxiv_id: "1909.03935", topic: membership_inference}  # unverified
+- {arxiv_id: "2302.01316", topic: membership_inference}
+- {arxiv_id: "2312.05140", topic: membership_inference}
+- {arxiv_id: "2302.12580", topic: membership_inference}
+- {arxiv_id: "2211.06550", topic: membership_inference}
+- {arxiv_id: "2011.07018", topic: membership_inference}
+- {arxiv_id: "2306.10308", topic: membership_inference}
+- {arxiv_id: "2508.21146", topic: membership_inference}
+- {arxiv_id: "2406.13012", topic: membership_inference}
+- {arxiv_id: "2509.05350", topic: membership_inference}
+- {arxiv_id: "2512.08875", topic: membership_inference}
+- {arxiv_id: "2509.18014", topic: membership_inference}
+- {arxiv_id: "2505.01524", topic: membership_inference}
+- {arxiv_id: "2503.12008", topic: membership_inference}
+- {arxiv_id: "2603.19185", topic: membership_inference}
+- {arxiv_id: "2204.00032", topic: membership_inference}
+- {arxiv_id: "2602.07126", topic: membership_inference}
+- {arxiv_id: "2410.07582", topic: membership_inference}
+- {arxiv_id: "2603.11799", topic: membership_inference}
+- {arxiv_id: "2605.06835", topic: membership_inference}
+- {arxiv_id: "2605.14686", topic: membership_inference}
+
+- {arxiv_id: "1607.00133", topic: differential_privacy}
+- {arxiv_id: "1702.07476", topic: differential_privacy}
+- {arxiv_id: "1908.10530", topic: differential_privacy}
+- {arxiv_id: "1905.02383", topic: differential_privacy}
+- {arxiv_id: "2106.02848", topic: differential_privacy}
+- {arxiv_id: "2405.20769", topic: differential_privacy}
+- {arxiv_id: "2403.17673", topic: differential_privacy}
+- {arxiv_id: "2411.04205", topic: differential_privacy}
+- {arxiv_id: "2411.10614", topic: differential_privacy}
+- {arxiv_id: "1902.08874", topic: differential_privacy}
+- {arxiv_id: "2204.13650", topic: differential_privacy}
+- {arxiv_id: "2210.03403", topic: differential_privacy}
+- {arxiv_id: "2212.06470", topic: differential_privacy}
+- {arxiv_id: "2303.00654", topic: differential_privacy}
+- {arxiv_id: "2110.05679", topic: differential_privacy}
+- {arxiv_id: "2110.06500", topic: differential_privacy}
+- {arxiv_id: "2501.18914", topic: differential_privacy}
+- {arxiv_id: "2006.07709", topic: differential_privacy}
+- {arxiv_id: "2101.04535", topic: differential_privacy}
+- {arxiv_id: "2302.07956", topic: differential_privacy}
+- {arxiv_id: "2305.08846", topic: differential_privacy}
+- {arxiv_id: "2410.22235", topic: differential_privacy}  # unverified (title/author)
+- {arxiv_id: "2405.14106", topic: differential_privacy}
+- {arxiv_id: "2410.06186", topic: differential_privacy}
+- {arxiv_id: "2405.14457", topic: differential_privacy}
+- {arxiv_id: "2302.03098", topic: differential_privacy}  # unverified
+- {arxiv_id: "1905.12101", topic: differential_privacy}
+- {arxiv_id: "2106.02674", topic: differential_privacy}
+- {arxiv_id: "2206.07737", topic: differential_privacy}
+- {arxiv_id: "1811.07971", topic: differential_privacy}
+- {arxiv_id: "2110.03620", topic: differential_privacy}
+- {arxiv_id: "2301.11989", topic: differential_privacy}
+- {arxiv_id: "1905.03871", topic: differential_privacy}  # unverified
+- {arxiv_id: "2206.07136", topic: differential_privacy}  # unverified
+- {arxiv_id: "2506.11687", topic: differential_privacy}
+- {arxiv_id: "2307.00310", topic: differential_privacy}
+
+- {arxiv_id: "2012.07805", topic: data_extraction}
+- {arxiv_id: "1802.08232", topic: data_extraction}
+- {arxiv_id: "2202.07646", topic: data_extraction}
+- {arxiv_id: "2304.11158", topic: data_extraction}
+- {arxiv_id: "2404.15146", topic: data_extraction}
+- {arxiv_id: "2410.19482", topic: data_extraction}
+- {arxiv_id: "2406.17746", topic: data_extraction}
+- {arxiv_id: "2310.18362", topic: data_extraction}
+- {arxiv_id: "2311.17035", topic: data_extraction}
+- {arxiv_id: "2505.12546", topic: data_extraction}
+- {arxiv_id: "2107.06499", topic: data_extraction}
+- {arxiv_id: "2202.06539", topic: data_extraction}
+- {arxiv_id: "2210.17546", topic: data_extraction}
+- {arxiv_id: "2301.13188", topic: data_extraction}
+- {arxiv_id: "2212.03860", topic: data_extraction}
+- {arxiv_id: "2302.00539", topic: data_extraction}
+- {arxiv_id: "2307.01881", topic: data_extraction}  # unverified (title/author)
+- {arxiv_id: "2502.15680", topic: data_extraction}
+- {arxiv_id: "2310.07298", topic: data_extraction}
+- {arxiv_id: "1906.05271", topic: data_extraction}
+- {arxiv_id: "2008.03703", topic: data_extraction}
+- {arxiv_id: "1912.03817", topic: data_extraction}
+- {arxiv_id: "2110.11891", topic: data_extraction}
+- {arxiv_id: "2403.01218", topic: data_extraction}
+- {arxiv_id: "2406.17216", topic: data_extraction}
+- {arxiv_id: "2412.06966", topic: data_extraction}
+- {arxiv_id: "2407.06460", topic: data_extraction}
+- {arxiv_id: "2401.06121", topic: data_extraction}
+- {arxiv_id: "2409.18025", topic: data_extraction}
+- {arxiv_id: "2501.04952", topic: data_extraction}
+
+- {arxiv_id: "1911.07135", topic: model_inversion}
+- {arxiv_id: "2010.04092", topic: model_inversion}
+- {arxiv_id: "2302.09814", topic: model_inversion}
+- {arxiv_id: "2201.12179", topic: model_inversion}
+- {arxiv_id: "2201.10787", topic: model_inversion}
+- {arxiv_id: "2209.01292", topic: model_inversion}
+- {arxiv_id: "1906.08935", topic: model_inversion}
+- {arxiv_id: "2003.14053", topic: model_inversion}
+- {arxiv_id: "2104.07586", topic: model_inversion}
+- {arxiv_id: "2110.13057", topic: model_inversion}
+- {arxiv_id: "2112.00059", topic: model_inversion}  # unverified
+- {arxiv_id: "2201.04845", topic: model_inversion}
+- {arxiv_id: "2206.07758", topic: model_inversion}
+- {arxiv_id: "2307.01827", topic: model_inversion}
+- {arxiv_id: "2009.05241", topic: model_inversion}  # unverified
+- {arxiv_id: "2206.05483", topic: model_inversion}  # unverified
+- {arxiv_id: "2310.06549", topic: model_inversion}
+- {arxiv_id: "2402.04013", topic: model_inversion}  # unverified
+- {arxiv_id: "2004.00053", topic: model_inversion}
+- {arxiv_id: "2305.03010", topic: model_inversion}
+- {arxiv_id: "2310.06816", topic: model_inversion}
+- {arxiv_id: "2507.07700", topic: model_inversion}
+- {arxiv_id: "2402.16893", topic: model_inversion}  # unverified
+- {arxiv_id: "2201.12383", topic: model_inversion}
+- {arxiv_id: "2302.07225", topic: model_inversion}
+- {arxiv_id: "2307.03928", topic: model_inversion}
+- {arxiv_id: "2202.07623", topic: model_inversion}
+- {arxiv_id: "2507.06969", topic: model_inversion}
+- {arxiv_id: "2609.37344", topic: model_inversion}
+
+- {arxiv_id: "2211.09527", topic: prompt_injection}
+- {arxiv_id: "2302.12173", topic: prompt_injection}
+- {arxiv_id: "2306.05499", topic: prompt_injection}
+- {arxiv_id: "2310.12815", topic: prompt_injection}
+- {arxiv_id: "2307.02483", topic: prompt_injection}  # unverified
+- {arxiv_id: "2308.03825", topic: prompt_injection}  # unverified
+- {arxiv_id: "2402.00898", topic: prompt_injection}
+- {arxiv_id: "2406.13352", topic: prompt_injection}
+- {arxiv_id: "2403.02691", topic: prompt_injection}
+- {arxiv_id: "2312.14197", topic: prompt_injection}
+- {arxiv_id: "2402.06363", topic: prompt_injection}
+- {arxiv_id: "2410.05451", topic: prompt_injection}
+- {arxiv_id: "2507.02735", topic: prompt_injection}
+- {arxiv_id: "2404.13208", topic: prompt_injection}
+- {arxiv_id: "2510.09023", topic: prompt_injection}
+- {arxiv_id: "2503.00061", topic: prompt_injection}
+- {arxiv_id: "2503.18813", topic: prompt_injection}
+- {arxiv_id: "2403.14720", topic: prompt_injection}
+- {arxiv_id: "2506.08837", topic: prompt_injection}
+- {arxiv_id: "2309.00614", topic: prompt_injection}
+- {arxiv_id: "2308.14132", topic: prompt_injection}
+- {arxiv_id: "2406.00799", topic: prompt_injection}
+- {arxiv_id: "2504.11358", topic: prompt_injection}
+- {arxiv_id: "2307.15043", topic: prompt_injection}
+- {arxiv_id: "2403.04957", topic: prompt_injection}
+- {arxiv_id: "2403.03792", topic: prompt_injection}
+- {arxiv_id: "2410.14923", topic: prompt_injection}
+- {arxiv_id: "2402.07867", topic: prompt_injection}
+- {arxiv_id: "2310.19156", topic: prompt_injection}
+- {arxiv_id: "2302.10149", topic: prompt_injection}
+- {arxiv_id: "2409.11295", topic: prompt_injection}  # unverified
+- {arxiv_id: "2510.15476", topic: prompt_injection}
+- {arxiv_id: "2602.10453", topic: prompt_injection}
+
+- {arxiv_id: "2212.10986", topic: other}
+- {arxiv_id: "2404.09932", topic: other}  # unverified

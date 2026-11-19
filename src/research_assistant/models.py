@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+Topic = Literal[
+    "membership_inference",
+    "differential_privacy",
+    "model_inversion",
+    "data_extraction",
+    "prompt_injection",
+    "other",
+]
+
+
+class PaperListEntry(_Frozen):
+    """One entry of data/papers.yaml."""
+
+    arxiv_id: str = Field(min_length=1)
+    topic: Topic
 
 
 class Paper(_Frozen):
@@ -18,6 +35,10 @@ class Paper(_Frozen):
     year: int | None = Field(default=None, ge=1900, le=2100)
     abstract: str | None = None
     url: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    version: int | None = Field(default=None, ge=1)
+    topic: Topic | None = None
+    latex_available: bool = False
 
 
 class Chunk(_Frozen):
