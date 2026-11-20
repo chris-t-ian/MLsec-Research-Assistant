@@ -1,0 +1,30 @@
+\documentclass{article}
+\usepackage{xcolor}
+\newcommand{\sys}{PrivGuard}
+\begin{document}
+\title{A Clean Paper on Membership Inference}
+\author{Alice Example \and Bob Example}
+\maketitle
+
+\begin{abstract}
+We study membership inference against a model $f_\theta$ trained with DP-SGD.
+\end{abstract}
+
+\input{sections/intro}
+% \input{sections/does_not_exist}
+
+\section{Method}
+\sys{} trains with DP-SGD where $\epsilon = 8$ and $\delta = 10^{-5}$.
+We report the attack advantage on CIFAR-10.
+
+\subsection{Gradient Clipping}
+We clip per-example gradients to norm $C$ before adding Gaussian noise. % note to self: cite Abadi
+The table uses \phantom{0} for alignment.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\appendix
+\section{Proofs}
+The proof follows from the composition theorem.
+\end{document}

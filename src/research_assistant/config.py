@@ -6,7 +6,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -38,6 +38,7 @@ class PathsConfig(BaseModel):
     raw_dir: Path = Path("data/raw")
     index_dir: Path = Path("data/index")
     papers_file: Path = Path("data/papers.yaml")
+    processed_dir: Path = Path("data/processed")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -49,6 +50,7 @@ class PathsConfig(BaseModel):
             raw_dir=_abs(self.raw_dir),
             index_dir=_abs(self.index_dir),
             papers_file=_abs(self.papers_file),
+            processed_dir=_abs(self.processed_dir),
         )
 
 
@@ -75,8 +77,20 @@ class RetrievalConfig(BaseModel):
     bm25_weight: float = Field(default=0.5, ge=0.0)
     dense_weight: float = Field(default=0.5, ge=0.0)
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    chunk_size: int = Field(default=1200, gt=0)
-    chunk_overlap: int = Field(default=200, ge=0)
+
+
+class ChunkingConfig(BaseModel):
+    """Chunk sizes are in tokens of ``encoding`` (tiktoken), used as an approximation."""
+
+    max_tokens: int = Field(default=800, gt=0)
+    overlap_tokens: int = Field(default=100, ge=0)
+    encoding: str = "cl100k_base"
+
+    @model_validator(mode="after")
+    def _check_overlap(self) -> ChunkingConfig:
+        if self.overlap_tokens >= self.max_tokens:
+            raise ValueError("overlap_tokens must be smaller than max_tokens")
+        return self
 
 
 class LoggingConfig(BaseModel):
@@ -104,6 +118,7 @@ class Settings(BaseSettings):
     paths: PathsConfig = PathsConfig()
     limits: LimitsConfig = LimitsConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
+    chunking: ChunkingConfig = ChunkingConfig()
     arxiv: ArxivConfig = ArxivConfig()
     logging: LoggingConfig = LoggingConfig()
 
@@ -150,5 +165,5 @@ def configure_logging(level: str = "INFO") -> None:
     else:
         root.setLevel(numeric)
     # Keep noisy HTTP client logs (which may include URLs/headers) quiet.
-    for noisy in ("httpx", "httpx2", "httpcore", "openai"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "pylatexenc", "pdfminer"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

@@ -16,6 +16,7 @@ paths:
   raw_dir: data/raw
   index_dir: data/index
   papers_file: data/papers.yaml
+  processed_dir: data/processed
 
 limits:
   max_question_chars: 2000
@@ -25,8 +26,12 @@ retrieval:
   bm25_weight: 0.5
   dense_weight: 0.5
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
-  chunk_size: 1200
-  chunk_overlap: 200
+
+chunking:
+  # Sizes in tokens; tiktoken cl100k_base is used as an approximation for all models.
+  max_tokens: 800
+  overlap_tokens: 100
+  encoding: cl100k_base
 
 arxiv:
   api_url: https://export.arxiv.org/api/query

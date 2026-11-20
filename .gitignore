@@ -4,6 +4,7 @@
 # Data and indexes
 data/raw/
 data/index/
+data/processed/
 
 # Chainlit
 .files/

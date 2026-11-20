@@ -10,10 +10,13 @@ dependencies = [
     "httpx>=0.28.1",
     "langchain-core>=1.8.3",
     "langchain-openai>=1.8.3",
+    "pdfplumber>=0.11.10",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
+    "pylatexenc>=2.11",
     "pyyaml>=6.0.3",
     "tenacity>=9.2.1",
+    "tiktoken>=0.14.0",
 ]
 
 [build-system]
@@ -25,6 +28,16 @@ dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
+]
+
+[tool.uv]
+# Development happens on an Intel Mac: make `uv lock` fail early (or pick older versions)
+# when a dependency has no wheel for it, instead of breaking `uv sync` later.
+required-environments = ["sys_platform == 'darwin' and platform_machine == 'x86_64'"]
+# cryptography (via pdfminer.six) ships no Intel-mac wheels after 48.0.1; building it
+# needs a Rust toolchain. uv's universal lock then resolves 48.0.1 for all platforms.
+constraint-dependencies = [
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [tool.pytest.ini_options]
