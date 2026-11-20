@@ -76,7 +76,12 @@ class RetrievalConfig(BaseModel):
     top_k: int = Field(default=8, gt=0)
     bm25_weight: float = Field(default=0.5, ge=0.0)
     dense_weight: float = Field(default=0.5, ge=0.0)
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Prepended to queries only (not documents). BGE v1.5 retrieval instruction; set to ""
+    # for models that do not use one.
+    query_instruction: str = "Represent this sentence for searching relevant passages: "
+    embedding_batch_size: int = Field(default=32, gt=0)
+    collection_name: str = "chunks"
 
 
 class ChunkingConfig(BaseModel):

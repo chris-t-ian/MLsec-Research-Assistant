@@ -355,7 +355,7 @@ def load_paper_list(path: Path) -> list[PaperListEntry]:
             entry = PaperListEntry.model_validate(item)
         except ValidationError as exc:
             raise ValueError(f"{path}: invalid entry #{i + 1}: {item!r}") from exc
-        if not _ARXIV_ID_RE.match(entry.arxiv_id):
+        if not is_valid_arxiv_id(entry.arxiv_id):
             raise ValueError(f"{path}: invalid arXiv ID {entry.arxiv_id!r}")
         if entry.arxiv_id in seen:
             logger.warning("Duplicate arXiv ID %s in %s; ignoring", entry.arxiv_id, path)
@@ -363,6 +363,11 @@ def load_paper_list(path: Path) -> list[PaperListEntry]:
         seen.add(entry.arxiv_id)
         entries.append(entry)
     return entries
+
+
+def is_valid_arxiv_id(arxiv_id: str) -> bool:
+    """True for new-style (``2401.12345``) and old-style (``hep-th/9901001``) IDs."""
+    return bool(_ARXIV_ID_RE.match(arxiv_id))
 
 
 def paper_dir(raw_dir: Path, arxiv_id: str) -> Path:
@@ -496,6 +501,7 @@ __all__ = [
     "build_corpus",
     "download_paper",
     "extract_eprint",
+    "is_valid_arxiv_id",
     "load_complete",
     "load_paper_list",
     "parse_metadata",

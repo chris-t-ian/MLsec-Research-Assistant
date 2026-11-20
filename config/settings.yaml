@@ -25,7 +25,12 @@ retrieval:
   top_k: 8
   bm25_weight: 0.5
   dense_weight: 0.5
-  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  # Local sentence-transformers model; embeddings are L2-normalized (cosine similarity).
+  # Changing the model requires `uv run python scripts/ingest.py --rebuild`.
+  embedding_model: BAAI/bge-small-en-v1.5
+  query_instruction: "Represent this sentence for searching relevant passages: "
+  embedding_batch_size: 32
+  collection_name: chunks
 
 chunking:
   # Sizes in tokens; tiktoken cl100k_base is used as an approximation for all models.
