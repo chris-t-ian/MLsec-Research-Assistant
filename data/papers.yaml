@@ -104,6 +104,7 @@
 - {arxiv_id: "2206.07136", topic: differential_privacy}  # unverified
 - {arxiv_id: "2506.11687", topic: differential_privacy}
 - {arxiv_id: "2307.00310", topic: differential_privacy}
+- {arxiv_id: "2609.37344", topic: differential_privacy}
 
 - {arxiv_id: "2012.07805", topic: data_extraction}
 - {arxiv_id: "1802.08232", topic: data_extraction}
@@ -135,7 +136,6 @@
 - {arxiv_id: "2401.06121", topic: data_extraction}
 - {arxiv_id: "2409.18025", topic: data_extraction}
 - {arxiv_id: "2501.04952", topic: data_extraction}
-- {arxiv_id: "2402.16893", topic: data_extraction}  # unverified
 
 - {arxiv_id: "1911.07135", topic: model_inversion}
 - {arxiv_id: "2010.04092", topic: model_inversion}
@@ -159,12 +159,12 @@
 - {arxiv_id: "2305.03010", topic: model_inversion}
 - {arxiv_id: "2310.06816", topic: model_inversion}
 - {arxiv_id: "2507.07700", topic: model_inversion}
+- {arxiv_id: "2402.16893", topic: model_inversion}  # unverified
 - {arxiv_id: "2201.12383", topic: model_inversion}
 - {arxiv_id: "2302.07225", topic: model_inversion}
 - {arxiv_id: "2307.03928", topic: model_inversion}
 - {arxiv_id: "2202.07623", topic: model_inversion}
 - {arxiv_id: "2507.06969", topic: model_inversion}
-- {arxiv_id: "2609.37344", topic: model_inversion}
 
 - {arxiv_id: "2211.09527", topic: prompt_injection}
 - {arxiv_id: "2302.12173", topic: prompt_injection}
