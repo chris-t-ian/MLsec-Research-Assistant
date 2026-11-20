@@ -1,0 +1,42 @@
+# Retrieval strategies, loaded by research_assistant.retrieval.strategies.load_strategies.
+# Fields: name, query_translation (none | multi_query | hyde | decompose), use_filters,
+# retriever (dense | bm25 | hybrid), rerank, fetch_k (candidates per ranked list),
+# top_k (chunks returned), rerank_k (fused candidates per group scored by the reranker;
+# top_k <= rerank_k <= fetch_k), max_chunks_per_paper. `defaults` apply to every strategy.
+
+defaults:
+  fetch_k: 30
+  top_k: 8
+  rerank_k: 15
+  max_chunks_per_paper: 3
+
+strategies:
+  - name: baseline_dense
+    query_translation: none
+    use_filters: false
+    retriever: dense
+    rerank: false
+
+  - name: hybrid
+    query_translation: none
+    use_filters: false
+    retriever: hybrid
+    rerank: false
+
+  - name: hybrid_multiquery
+    query_translation: multi_query
+    use_filters: false
+    retriever: hybrid
+    rerank: false
+
+  - name: hybrid_hyde_rerank
+    query_translation: hyde
+    use_filters: false
+    retriever: hybrid
+    rerank: true
+
+  - name: full
+    query_translation: multi_query
+    use_filters: true
+    retriever: hybrid
+    rerank: true

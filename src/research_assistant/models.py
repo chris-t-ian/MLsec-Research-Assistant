@@ -69,11 +69,98 @@ class Citation(_Frozen):
     quote: str | None = None
 
 
-class RetrievalResult(_Frozen):
+class ScoredChunk(_Frozen):
+    """One ranked hit. ``score`` is the score of the stage that produced the ranking."""
+
     chunk: Chunk
     score: float
     rank: int = Field(ge=1)
-    source: str = Field(description="Retriever that produced this hit, e.g. 'bm25', 'dense'.")
+    source: str = Field(
+        description="Stage that produced this ranking, e.g. 'bm25', 'dense', 'rrf', 'rerank'."
+    )
+    # Scores from every stage the chunk passed, e.g. {"dense": 0.71, "rrf": 0.032}.
+    stage_scores: dict[str, float] = Field(default_factory=dict)
+
+
+# --------------------------------------------------------------------------- retrieval
+
+SectionType = Literal["method", "results", "related_work", "any"]
+QueryTranslation = Literal["none", "multi_query", "hyde", "decompose"]
+RetrieverKind = Literal["dense", "bm25", "hybrid"]
+
+
+class QueryFilters(_Frozen):
+    """Validated metadata filters (only values known to the index survive validation)."""
+
+    year_min: int | None = Field(default=None, ge=1900, le=2100)
+    year_max: int | None = Field(default=None, ge=1900, le=2100)
+    topic: Topic | None = None
+    authors: list[str] = Field(default_factory=list)
+    arxiv_ids: list[str] = Field(default_factory=list)
+    section_type: SectionType = "any"
+
+    def is_empty(self) -> bool:
+        return (
+            self.year_min is None
+            and self.year_max is None
+            and self.topic is None
+            and not self.authors
+            and not self.arxiv_ids
+            and self.section_type == "any"
+        )
+
+
+class TokenUsage(_Frozen):
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+        )
+
+
+class CandidateScore(_Frozen):
+    """A candidate as seen by one stage (ids and scores only, no text)."""
+
+    chunk_id: str
+    arxiv_id: str
+    rank: int = Field(ge=1)
+    score: float
+    list_name: str = Field(description="Ranked list the candidate came from, e.g. 'dense:q0'.")
+
+
+class StageTrace(_Frozen):
+    stage: str
+    latency_ms: float = Field(ge=0)
+    candidates: list[CandidateScore] = Field(default_factory=list)
+    token_usage: TokenUsage = TokenUsage()
+    notes: list[str] = Field(default_factory=list)
+
+
+class RetrievalTrace(_Frozen):
+    strategy: str
+    question: str
+    semantic_query: str = Field(description="Query after self-query cleaning (or the question).")
+    rewrites: list[str] = Field(
+        default_factory=list, description="Paraphrases, HyDE passages or sub-questions."
+    )
+    filters: QueryFilters | None = None
+    stages: list[StageTrace] = Field(default_factory=list)
+    token_usage: TokenUsage = TokenUsage()
+    total_latency_ms: float = Field(default=0.0, ge=0)
+
+
+class RetrievalResult(_Frozen):
+    """Outcome of one retrieval run: the selected chunks plus a full trace."""
+
+    question: str
+    strategy: str
+    chunks: list[ScoredChunk] = Field(default_factory=list)
+    trace: RetrievalTrace
 
 
 class Answer(_Frozen):

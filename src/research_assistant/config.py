@@ -39,6 +39,7 @@ class PathsConfig(BaseModel):
     index_dir: Path = Path("data/index")
     papers_file: Path = Path("data/papers.yaml")
     processed_dir: Path = Path("data/processed")
+    strategies_file: Path = Path("config/strategies.yaml")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -51,6 +52,7 @@ class PathsConfig(BaseModel):
             index_dir=_abs(self.index_dir),
             papers_file=_abs(self.papers_file),
             processed_dir=_abs(self.processed_dir),
+            strategies_file=_abs(self.strategies_file),
         )
 
 
@@ -82,6 +84,12 @@ class RetrievalConfig(BaseModel):
     query_instruction: str = "Represent this sentence for searching relevant passages: "
     embedding_batch_size: int = Field(default=32, gt=0)
     collection_name: str = "chunks"
+    # Cross-encoder used by strategies with ``rerank: true``.
+    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_max_length: int = Field(default=256, gt=0)
+    reranker_batch_size: int = Field(default=16, gt=0)
+    # Reciprocal Rank Fusion constant: score = sum 1 / (rrf_k + rank).
+    rrf_k: int = Field(default=60, gt=0)
 
 
 class ChunkingConfig(BaseModel):
