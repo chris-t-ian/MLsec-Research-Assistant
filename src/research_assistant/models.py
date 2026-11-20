@@ -62,11 +62,16 @@ class Chunk(_Frozen):
 
 
 class Citation(_Frozen):
+    """One source cited in an answer; ``number`` is the ``[n]`` marker used in the answer."""
+
+    number: int = Field(ge=1)
     chunk_id: str = Field(min_length=1)
     arxiv_id: str = Field(min_length=1)
+    label: str = Field(description="Short author-year label, e.g. 'Shokri et al. 2017'.")
     title: str
     section: str | None = None
-    quote: str | None = None
+    excerpt: str = ""
+    url: str
 
 
 class ScoredChunk(_Frozen):
@@ -163,11 +168,42 @@ class RetrievalResult(_Frozen):
     trace: RetrievalTrace
 
 
+# --------------------------------------------------------------------------- generation
+
+
+class Source(_Frozen):
+    """A retrieved chunk as numbered source ``[number]`` in the generation prompt."""
+
+    number: int = Field(ge=1)
+    chunk: Chunk
+    label: str = Field(description="Short author-year label, unique within one prompt.")
+
+
+class CitationError(_Frozen):
+    """A marker in the model output that refers to no source (removed from the answer)."""
+
+    marker: str
+    number: int
+    reason: str
+
+
 class Answer(_Frozen):
     question: str
-    text: str
+    text: str = Field(description="Answer with markers rendered as '(Shokri et al. 2017 [1])'.")
+    raw_text: str = Field(
+        default="", description="Answer with validated numeric markers only, e.g. '... [1][3].'"
+    )
     citations: list[Citation] = Field(default_factory=list)
+    citation_errors: list[CitationError] = Field(default_factory=list)
+    strategy: str | None = None
+    retrieval: RetrievalTrace | None = None
     model: str | None = None
+    token_usage: TokenUsage = Field(
+        default=TokenUsage(), description="Retrieval + generation tokens."
+    )
+    generation_token_usage: TokenUsage = TokenUsage()
+    latency_ms: float = Field(default=0.0, ge=0)
+    generation_latency_ms: float = Field(default=0.0, ge=0)
 
 
 # --------------------------------------------------------------------------- ingest

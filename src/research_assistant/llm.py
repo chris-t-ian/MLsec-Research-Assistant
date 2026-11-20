@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any, Literal, Protocol, TypeVar
 
 import openai
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 from tenacity import (
     RetryError,
     Retrying,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -46,6 +48,7 @@ def _build(model: str, settings: Settings) -> ChatOpenAI:
         timeout=settings.llm.timeout_s,
         max_retries=settings.llm.max_retries,
         temperature=settings.llm.temperature,
+        stream_usage=True,
     )
 
 
@@ -155,3 +158,122 @@ class ChatStructuredLLM:
 def get_structured_llm(role: Role, settings: Settings | None = None) -> ChatStructuredLLM:
     settings = settings or get_settings()
     return ChatStructuredLLM(get_chat_model(role, settings), max_attempts=settings.llm.max_retries)
+
+
+# --------------------------------------------------------------------------- streaming
+
+
+class StreamResult(BaseModel):
+    text: str
+    usage: TokenUsage = TokenUsage()
+    model: str | None = None
+
+
+class StreamingLLM(Protocol):
+    """Streams a text answer for a (system, user) prompt, calling ``on_token`` per chunk."""
+
+    def stream_text(self, system: str, user: str, on_token: Callable[[str], None]) -> StreamResult:
+        """Raise :class:`LLMCallError` on failure."""
+        ...
+
+
+class _EmptyResponse(Exception):
+    """The model returned no text."""
+
+
+class _StreamInterrupted(Exception):
+    """The stream failed after tokens were already emitted (not retried)."""
+
+
+def content_text(content: Any) -> str:
+    """Text of a message (chunk) content: a string or a list of content blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "".join(parts)
+    return ""
+
+
+class ChatStreamingLLM:
+    """:class:`StreamingLLM` on a LangChain chat model.
+
+    A call is retried (exponential backoff) only while no token has been emitted yet;
+    once tokens reached ``on_token``, a failure is final, so the UI never sees text twice.
+    """
+
+    def __init__(
+        self,
+        model: Runnable[LanguageModelInput, BaseMessage],
+        max_attempts: int = 3,
+        backoff_s: float = 1.0,
+        model_name: str | None = None,
+    ) -> None:
+        self._model = model
+        self._max_attempts = max(1, max_attempts)
+        self._backoff_s = backoff_s
+        self._model_name = model_name
+
+    def stream_text(self, system: str, user: str, on_token: Callable[[str], None]) -> StreamResult:
+        messages = [SystemMessage(content=system), HumanMessage(content=user)]
+        emitted = False
+
+        def _once() -> StreamResult:
+            nonlocal emitted
+            parts: list[str] = []
+            agg: Any = None
+            model: str | None = None
+            try:
+                for chunk in self._model.stream(messages):
+                    agg = chunk if agg is None else agg + chunk
+                    # Read per chunk: adding chunks concatenates metadata strings.
+                    meta = getattr(chunk, "response_metadata", None) or {}
+                    model = model or meta.get("model_name") or meta.get("model")
+                    text = content_text(getattr(chunk, "content", ""))
+                    if text:
+                        emitted = True
+                        parts.append(text)
+                        on_token(text)
+            except Exception as exc:
+                if emitted:
+                    raise _StreamInterrupted(type(exc).__name__) from exc
+                raise
+            text = "".join(parts)
+            if not text.strip():
+                raise _EmptyResponse()
+            return StreamResult(
+                text=text, usage=usage_from_message(agg), model=model or self._model_name
+            )
+
+        retrying = Retrying(
+            stop=stop_after_attempt(self._max_attempts),
+            wait=wait_exponential(multiplier=self._backoff_s, max=20),
+            retry=retry_if_exception(
+                lambda e: not emitted and isinstance(e, (*_RETRYABLE, _EmptyResponse))
+            ),
+            reraise=False,
+        )
+        try:
+            return retrying(_once)
+        except RetryError as exc:
+            cause = exc.last_attempt.exception()
+            name = type(cause).__name__ if cause else "unknown"
+            raise LLMCallError(f"Streaming LLM call failed ({name})") from cause
+        except _StreamInterrupted as exc:
+            raise LLMCallError(f"LLM stream interrupted ({exc})") from exc
+        except Exception as exc:  # non-retryable (auth, bad request, ...)
+            raise LLMCallError(f"Streaming LLM call failed ({type(exc).__name__})") from exc
+
+
+def get_streaming_llm(role: Role, settings: Settings | None = None) -> ChatStreamingLLM:
+    settings = settings or get_settings()
+    return ChatStreamingLLM(
+        get_chat_model(role, settings),
+        max_attempts=settings.llm.max_retries,
+        model_name=getattr(settings.models, role),
+    )

@@ -56,5 +56,13 @@ arxiv:
   max_download_mb: 100
   max_extract_mb: 500
 
+generation:
+  # Spotlighting: sources are always wrapped in delimiters with a random per-request boundary.
+  # datamarking: true additionally interleaves datamark_char into the source text (red-team
+  # comparison); default "ˆ" (U+02C6).
+  datamarking: false
+  datamark_char: "\u02C6"
+  excerpt_chars: 300
+
 logging:
   level: INFO

@@ -106,6 +106,17 @@ class ChunkingConfig(BaseModel):
         return self
 
 
+class GenerationConfig(BaseModel):
+    """Cited answer generation (see research_assistant.generation)."""
+
+    # Spotlighting by datamarking (Hines et al. 2024): additionally replace every whitespace
+    # run in source text with ``datamark_char``. Delimiters with a random boundary are always on.
+    datamarking: bool = False
+    datamark_char: str = Field(default=chr(0x02C6), min_length=1, max_length=1)
+    # Length of the source excerpt stored on each Citation.
+    excerpt_chars: int = Field(default=300, gt=0)
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -133,6 +144,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalConfig = RetrievalConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     arxiv: ArxivConfig = ArxivConfig()
+    generation: GenerationConfig = GenerationConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
