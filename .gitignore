@@ -8,6 +8,7 @@ data/processed/
 
 # Chainlit
 .files/
+.chainlit/translations/
 chainlit.db
 
 # Python

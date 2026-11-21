@@ -134,6 +134,21 @@ def get_strategy(name: str, settings: Settings | None = None) -> StrategyConfig:
     return strategies[name]
 
 
+def strategy_names(settings: Settings | None = None) -> list[str]:
+    """Names of the strategies in strategies.yaml, in file order."""
+    settings = settings or get_settings()
+    return list(load_strategies(settings.paths.resolve().strategies_file))
+
+
+def with_top_k(strategy: StrategyConfig, top_k: int) -> StrategyConfig:
+    """Copy of ``strategy`` returning ``top_k`` chunks (fetch_k / rerank_k raised if needed)."""
+    data = strategy.model_dump()
+    data["top_k"] = top_k
+    data["fetch_k"] = max(strategy.fetch_k, top_k)
+    data["rerank_k"] = max(strategy.rerank_k, top_k)
+    return StrategyConfig.model_validate(data)
+
+
 # --------------------------------------------------------------------------- dependencies
 
 
@@ -437,4 +452,6 @@ __all__ = [
     "load_strategies",
     "retrieve",
     "select_chunks",
+    "strategy_names",
+    "with_top_k",
 ]

@@ -729,3 +729,23 @@ def test_retrieve_rejects_bad_questions(index: ChunkIndex) -> None:
         retrieve("   ", _strategy(), None, deps)
     with pytest.raises(RetrievalError, match="too long"):
         retrieve("x" * 21, _strategy(), None, deps)
+
+
+# --------------------------------------------------------------------------- top_k override
+
+
+def test_with_top_k_raises_fetch_and_rerank_k() -> None:
+    from research_assistant.retrieval.strategies import StrategyConfig, with_top_k
+
+    base = StrategyConfig(name="s", rerank=True, fetch_k=10, top_k=5, rerank_k=8)
+    assert with_top_k(base, 3).top_k == 3
+    big = with_top_k(base, 12)
+    assert (big.top_k, big.rerank_k, big.fetch_k) == (12, 12, 12)
+    assert base.top_k == 5  # original unchanged
+
+
+def test_strategy_names_lists_configured_strategies() -> None:
+    from research_assistant.retrieval.strategies import strategy_names
+
+    names = strategy_names()
+    assert "hybrid" in names and len(names) == len(set(names))

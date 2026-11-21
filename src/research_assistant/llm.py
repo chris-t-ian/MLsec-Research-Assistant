@@ -53,11 +53,11 @@ def _build(model: str, settings: Settings) -> ChatOpenAI:
 
 
 def get_chat_model(
-    role: Role, settings: Settings | None = None
+    role: Role, settings: Settings | None = None, model: str | None = None
 ) -> Runnable[LanguageModelInput, BaseMessage]:
-    """Return the chat model for `role`, falling back to the configured fallback model."""
+    """Return the chat model for `role` (or `model`), falling back to the fallback model."""
     settings = settings or get_settings()
-    model_name = getattr(settings.models, role)
+    model_name = model or getattr(settings.models, role)
     primary = _build(model_name, settings)
     fallback_name = settings.models.fallback
     if fallback_name == model_name:
@@ -210,11 +210,11 @@ class ChatToolCallingLLM:
 
 
 def get_tool_calling_llm(
-    role: Role, tools: Sequence[Any], settings: Settings | None = None
+    role: Role, tools: Sequence[Any], settings: Settings | None = None, model: str | None = None
 ) -> ChatToolCallingLLM:
-    """The ``role`` model (with fallback model) bound to ``tools`` (BaseTools or JSON schemas)."""
+    """The ``role`` model, or ``model`` if given (with fallback model), bound to ``tools``."""
     settings = settings or get_settings()
-    model_name = getattr(settings.models, role)
+    model_name = model or getattr(settings.models, role)
     primary: Runnable[LanguageModelInput, BaseMessage] = _build(model_name, settings).bind_tools(
         list(tools)
     )
@@ -334,10 +334,12 @@ class ChatStreamingLLM:
             raise LLMCallError(f"Streaming LLM call failed ({type(exc).__name__})") from exc
 
 
-def get_streaming_llm(role: Role, settings: Settings | None = None) -> ChatStreamingLLM:
+def get_streaming_llm(
+    role: Role, settings: Settings | None = None, model: str | None = None
+) -> ChatStreamingLLM:
     settings = settings or get_settings()
     return ChatStreamingLLM(
-        get_chat_model(role, settings),
+        get_chat_model(role, settings, model),
         max_attempts=settings.llm.max_retries,
-        model_name=getattr(settings.models, role),
+        model_name=model or getattr(settings.models, role),
     )

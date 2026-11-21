@@ -406,3 +406,45 @@ def test_split_turns_ignores_unfinished_turns() -> None:
     past, current = split_turns(msgs)
     assert past == [("q1", "a1")]
     assert [m.content for m in current] == ["q3"]
+
+
+# --------------------------------------------------------------------------- session overrides
+
+
+def _chunk(i: int) -> Chunk:
+    return LIRA.model_copy(
+        update={"id": f"2001.0000{i}:1:0", "arxiv_id": f"2001.0000{i}", "text": f"Text {i}."}
+    )
+
+
+def test_session_top_k_limits_search_results() -> None:
+    agent, _, _, _ = make_agent([], chunks=[_chunk(i) for i in range(1, 6)])
+    s = session()
+    s.top_k = 2
+    res = agent.run_turn("What is LiRA?", s, RecordingSink())
+    search = next(o for o in res.tool_results if o.name == "search_knowledge_base")
+    assert search.result.ok
+    assert search.result.data["n_sources_total"] == 2
+
+
+def test_session_top_k_is_validated() -> None:
+    s = session()
+    with pytest.raises(ValueError):
+        s.top_k = 0
+
+
+def test_unknown_session_model_is_rejected_friendly() -> None:
+    agent, llm, gen, _ = make_agent([])
+    s = session()
+    s.model = "unknown/model"
+    res = agent.run_turn("What is LiRA?", s, RecordingSink())
+    assert res.answer == "The selected model is not available. Pick another model."
+    assert llm.prompts == [] and gen.prompts == []
+
+
+def test_resolve_model_defaults_to_main_and_accepts_choices() -> None:
+    settings = get_settings()
+    deps = AgentDeps(settings, llm=ScriptedAgentLLM([]), policy=ToolPolicy(6, AuditLog(None)))
+    assert deps.resolve_model(None) == settings.models.main
+    for name in settings.models.choices():
+        assert deps.resolve_model(name) == name

@@ -296,6 +296,49 @@ def parse_citations(
     )
 
 
+def citation_ref_name(citation: Citation) -> str:
+    """Display name of a citation, e.g. ``[1] Shokri et al. 2017`` (UIs key elements by it)."""
+    return f"[{citation.number}] {citation.label}"
+
+
+def render_with_references(
+    raw_text: str,
+    citations: Sequence[Citation],
+    tool_citations: Sequence[ToolCitation] = (),
+) -> str:
+    """Render :attr:`Answer.raw_text` with each marker run as ``([1] Shokri et al. 2017; ...)``.
+
+    Uses :func:`citation_ref_name`, so a UI can attach one element per citation under that
+    name. Tool markers become ``(dp_accountant [T1])``. Markers without a citation are
+    dropped (raw_text only holds validated markers, so this is defensive).
+    """
+    by_number = {c.number: c for c in citations}
+    tools = {t.number: t for t in tool_citations}
+
+    def _sources(m: re.Match[str]) -> str:
+        seen: list[int] = []
+        for n in (int(x) for x in _NUM.findall(m["run"])):
+            if n in by_number and n not in seen:
+                seen.append(n)
+        if not seen:
+            return ""
+        pre = m["pre"]
+        if not pre and m.start() > 0 and not m.string[m.start() - 1].isspace():
+            pre = " "
+        return pre + "(" + "; ".join(citation_ref_name(by_number[n]) for n in seen) + ")"
+
+    def _tools(m: re.Match[str]) -> str:
+        seen = [n for n in dict.fromkeys(int(x) for x in _TOOL_NUM.findall(m["run"])) if n in tools]
+        if not seen:
+            return ""
+        pre = m["pre"]
+        if not pre and m.start() > 0 and not m.string[m.start() - 1].isspace():
+            pre = " "
+        return pre + "(" + "; ".join(f"{tools[n].name} [T{n}]" for n in seen) + ")"
+
+    return _TOOL_RUN.sub(_tools, _RUN.sub(_sources, raw_text)).strip()
+
+
 # --------------------------------------------------------------------------- dependencies
 
 
@@ -487,10 +530,12 @@ __all__ = [
     "ParsedCitations",
     "answer",
     "author_year_label",
+    "citation_ref_name",
     "default_answer_deps",
     "generate_answer",
     "make_excerpt",
     "make_sources",
     "parse_citations",
+    "render_with_references",
     "surname",
 ]

@@ -25,6 +25,12 @@ class ModelsConfig(BaseModel):
     main: str
     judge: str
     fallback: str
+    # Extra models a user may pick for answering (UI model setting), besides main and fallback.
+    selectable: list[str] = Field(default_factory=list)
+
+    def choices(self) -> list[str]:
+        """Models a session may answer with: main first, then fallback and ``selectable``."""
+        return list(dict.fromkeys([self.main, self.fallback, *self.selectable]))
 
 
 class LLMConfig(BaseModel):

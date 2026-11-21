@@ -84,9 +84,11 @@ from research_assistant.models import (
 from research_assistant.retrieval.strategies import (
     RetrievalDeps,
     RetrievalError,
+    StrategyConfig,
     StrategyConfigError,
     get_strategy,
     retrieve,
+    with_top_k,
 )
 from research_assistant.security.canary import (
     CANARY_REFUSAL,
@@ -208,6 +210,8 @@ class TurnContext:
     sink: EventSink
     turn_id: str
     strategy: str
+    strategy_config: StrategyConfig | None = None  # resolved strategy incl. session top_k
+    model: str | None = None  # session model override (validated in run_turn)
     events: list[SecurityEvent] = field(default_factory=list)
     trace: list[TraceStep] = field(default_factory=list)
     outcomes: list[ToolCallOutcome] = field(default_factory=list)
@@ -246,8 +250,11 @@ class AgentDeps:
             s.agent.max_tool_calls_per_turn, AuditLog(s.paths.resolve().audit_log)
         )
         self.detector = detector or InjectionDetector.from_config(s.security.injection)
-        self._llm = llm
-        self._answer_deps = answer_deps
+        # Injected test doubles are used for every model; real LLMs are cached per model.
+        self._fixed_llm = llm
+        self._fixed_answer_deps = answer_deps
+        self._llms: dict[str, ToolCallingLLM] = {}
+        self._answer_deps: dict[str, AnswerDeps] = {}
         self._retrieval = retrieval
         self._lock = threading.Lock()
 
@@ -262,17 +269,37 @@ class AgentDeps:
         }
         return [search, *self.domain_tools]
 
-    @property
-    def llm(self) -> ToolCallingLLM:
+    def resolve_model(self, model: str | None) -> str:
+        """``model`` if it is a selectable model, ``models.main`` for None.
+
+        Raises AgentConfigError (user-safe) for models not in ``settings.models.choices()``.
+        """
+        choices = self.settings.models.choices()
+        if model is None:
+            return choices[0]
+        if model not in choices:
+            raise AgentConfigError("The selected model is not available. Pick another model.")
+        return model
+
+    def llm_for(self, model: str | None = None) -> ToolCallingLLM:
+        if self._fixed_llm is not None:
+            return self._fixed_llm
+        name = self.resolve_model(model)
         with self._lock:
-            if self._llm is None:
+            if name not in self._llms:
                 try:
-                    self._llm = get_tool_calling_llm("main", self.tool_schemas(), self.settings)
+                    self._llms[name] = get_tool_calling_llm(
+                        "main", self.tool_schemas(), self.settings, model=name
+                    )
                 except LLMConfigError as exc:
                     raise AgentConfigError(
                         "No language model is configured. Set OPENROUTER_API_KEY in your .env."
                     ) from exc
-            return self._llm
+            return self._llms[name]
+
+    @property
+    def llm(self) -> ToolCallingLLM:
+        return self.llm_for(None)
 
     @property
     def retrieval(self) -> RetrievalDeps:
@@ -281,21 +308,25 @@ class AgentDeps:
                 self._retrieval = RetrievalDeps.from_settings(self.settings)
             return self._retrieval
 
-    @property
-    def answer_deps(self) -> AnswerDeps:
-        if self._answer_deps is None:
-            retrieval = self.retrieval
-            with self._lock:
+    def answer_deps_for(self, model: str | None = None) -> AnswerDeps:
+        if self._fixed_answer_deps is not None:
+            return self._fixed_answer_deps
+        name = self.resolve_model(model)
+        retrieval = self.retrieval
+        with self._lock:
+            if name not in self._answer_deps:
                 try:
-                    llm = get_streaming_llm("main", self.settings)
+                    llm = get_streaming_llm("main", self.settings, model=name)
                 except LLMConfigError as exc:
                     raise AgentConfigError(
                         "No language model is configured. Set OPENROUTER_API_KEY in your .env."
                     ) from exc
-                self._answer_deps = AnswerDeps(
-                    retrieval, llm, self.settings.generation, self.settings.models.main
-                )
-        return self._answer_deps
+                self._answer_deps[name] = AnswerDeps(retrieval, llm, self.settings.generation, name)
+            return self._answer_deps[name]
+
+    @property
+    def answer_deps(self) -> AnswerDeps:
+        return self.answer_deps_for(None)
 
 
 _DOMAIN_TOOLS: dict[str, tuple[type[ToolArgs], Callable[..., ToolResult]]] = {
@@ -489,7 +520,9 @@ class ResearchAgent:
         )
         steps = state.get("agent_steps", 0) + 1
         try:
-            msg = self.deps.llm.invoke_messages([SystemMessage(content=system), *history, *current])
+            msg = self.deps.llm_for(ctx.model).invoke_messages(
+                [SystemMessage(content=system), *history, *current]
+            )
         except LLMCallError as exc:
             logger.warning("Agent model failed, answering with collected evidence: %s", exc)
             return {"agent_steps": steps}, {"error": "agent model unavailable"}
@@ -645,7 +678,12 @@ class ResearchAgent:
                 chunks
             )
         try:
-            res = retrieve(parsed.question, ctx.strategy, ctx.sink, self.deps.retrieval)
+            res = retrieve(
+                parsed.question,
+                ctx.strategy_config or ctx.strategy,
+                ctx.sink,
+                self.deps.retrieval,
+            )
         except RetrievalError as exc:
             return ToolResult(ok=False, error=str(exc), source="validation"), chunks
         except StrategyConfigError:
@@ -730,7 +768,7 @@ class ResearchAgent:
                 q,
                 chunks,
                 guard,
-                self.deps.answer_deps,
+                self.deps.answer_deps_for(ctx.model),
                 tool_results=evidence,
                 history=past[-n_hist:] if n_hist else [],
                 extra_system=canary_instruction(session.canary),
@@ -785,6 +823,7 @@ class ResearchAgent:
             sink=sink,
             turn_id=f"t{session.turns}",
             strategy=session.strategy or self.settings.agent.default_strategy,
+            model=session.model,
         )
         initial: AgentState = {
             "question": question if isinstance(question, str) else "",
@@ -802,7 +841,11 @@ class ResearchAgent:
             "recursion_limit": 4 * self.settings.agent.max_agent_steps + 10,
         }
         try:
-            get_strategy(ctx.strategy, self.settings)
+            strategy = get_strategy(ctx.strategy, self.settings)
+            ctx.strategy_config = (
+                with_top_k(strategy, session.top_k) if session.top_k is not None else strategy
+            )
+            self.deps.resolve_model(ctx.model)
             self.graph.invoke(initial, config)
         except AgentConfigError as exc:
             ctx.answer = Answer(question=question, text=str(exc), raw_text=str(exc))

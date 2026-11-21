@@ -412,3 +412,28 @@ def test_tool_markers_validated_and_grouped() -> None:
     assert "differ (dp_accountant [T1][T2])." in p.text and "[T7]" not in p.text
     assert [c.number for c in p.tool_citations] == [1, 2]
     assert [e.marker for e in p.errors] == ["[T7]"]
+
+
+# --------------------------------------------------------------------------- UI references
+
+
+def test_render_with_references_uses_element_names() -> None:
+    from research_assistant.generation.answer import citation_ref_name, render_with_references
+    from research_assistant.models import Citation, ToolCitation
+
+    c1 = Citation(
+        number=1,
+        chunk_id="a:1:0",
+        arxiv_id="1610.05820",
+        label="Shokri et al. 2017",
+        title="MIA",
+        url="https://arxiv.org/abs/1610.05820",
+    )
+    c3 = c1.model_copy(update={"number": 3, "label": "Yeom et al. 2018", "chunk_id": "b:1:0"})
+    raw = "Shadow models [1][3]. Loss threshold[3]. Epsilon is 8 [T1]. Bogus [9]."
+    out = render_with_references(raw, [c1, c3], [ToolCitation(number=1, name="dp", ok=True)])
+    assert citation_ref_name(c1) == "[1] Shokri et al. 2017"
+    assert out == (
+        "Shadow models ([1] Shokri et al. 2017; [3] Yeom et al. 2018). "
+        "Loss threshold ([3] Yeom et al. 2018). Epsilon is 8 (dp [T1]). Bogus."
+    )

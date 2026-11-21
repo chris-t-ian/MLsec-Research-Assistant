@@ -35,6 +35,14 @@ class SessionState(BaseModel):
         pattern=r"^[a-z0-9_]+$",
         description="Retrieval strategy; None uses agent.default_strategy from settings.",
     )
+    top_k: int | None = Field(
+        default=None, ge=1, le=50, description="Chunks per search; None uses the strategy's."
+    )
+    model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Answering model (one of settings.models.choices()); None uses models.main.",
+    )
     canary: str = Field(default_factory=new_canary, exclude=True, repr=False)
     pending_ingests: dict[str, IngestRequest] = Field(
         default_factory=dict, description="Ingest requests awaiting user confirmation."
