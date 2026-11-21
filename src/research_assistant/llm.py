@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Literal, Protocol, TypeVar
 
 import openai
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
@@ -158,6 +158,70 @@ class ChatStructuredLLM:
 def get_structured_llm(role: Role, settings: Settings | None = None) -> ChatStructuredLLM:
     settings = settings or get_settings()
     return ChatStructuredLLM(get_chat_model(role, settings), max_attempts=settings.llm.max_retries)
+
+
+# --------------------------------------------------------------------------- tool calling
+
+
+class ToolCallingLLM(Protocol):
+    """Chat model bound to tools: returns an AIMessage (text and/or tool calls)."""
+
+    def invoke_messages(self, messages: Sequence[BaseMessage]) -> AIMessage:
+        """Raise :class:`LLMCallError` on failure."""
+        ...
+
+
+class ChatToolCallingLLM:
+    """:class:`ToolCallingLLM` on a tool-bound LangChain chat model (tenacity retries)."""
+
+    def __init__(
+        self,
+        model: Runnable[LanguageModelInput, BaseMessage],
+        max_attempts: int = 3,
+        backoff_s: float = 1.0,
+        model_name: str | None = None,
+    ) -> None:
+        self._model = model
+        self._max_attempts = max(1, max_attempts)
+        self._backoff_s = backoff_s
+        self.model_name = model_name
+
+    def invoke_messages(self, messages: Sequence[BaseMessage]) -> AIMessage:
+        def _once() -> AIMessage:
+            out = self._model.invoke(list(messages))
+            if not isinstance(out, AIMessage):
+                raise _ParseFailure("AIMessage")
+            return out
+
+        retrying = Retrying(
+            stop=stop_after_attempt(self._max_attempts),
+            wait=wait_exponential(multiplier=self._backoff_s, max=20),
+            retry=retry_if_exception_type(_RETRYABLE),
+            reraise=False,
+        )
+        try:
+            return retrying(_once)
+        except RetryError as exc:
+            cause = exc.last_attempt.exception()
+            name = type(cause).__name__ if cause else "unknown"
+            raise LLMCallError(f"Tool-calling LLM call failed ({name})") from cause
+        except Exception as exc:  # non-retryable (auth, bad request, ...)
+            raise LLMCallError(f"Tool-calling LLM call failed ({type(exc).__name__})") from exc
+
+
+def get_tool_calling_llm(
+    role: Role, tools: Sequence[Any], settings: Settings | None = None
+) -> ChatToolCallingLLM:
+    """The ``role`` model (with fallback model) bound to ``tools`` (BaseTools or JSON schemas)."""
+    settings = settings or get_settings()
+    model_name = getattr(settings.models, role)
+    primary: Runnable[LanguageModelInput, BaseMessage] = _build(model_name, settings).bind_tools(
+        list(tools)
+    )
+    fallback_name = settings.models.fallback
+    if fallback_name != model_name:
+        primary = primary.with_fallbacks([_build(fallback_name, settings).bind_tools(list(tools))])
+    return ChatToolCallingLLM(primary, max_attempts=settings.llm.max_retries, model_name=model_name)
 
 
 # --------------------------------------------------------------------------- streaming

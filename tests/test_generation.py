@@ -392,3 +392,23 @@ def test_answer_llm_failure_is_friendly() -> None:
         generate_answer("How do shadow models work?", STRATEGY, None, deps)
     msg = str(exc_info.value)
     assert "try again" in msg and "APIConnectionError" not in msg and "Traceback" not in msg
+
+
+def test_tool_markers_validated_and_grouped() -> None:
+    from research_assistant.models import ToolEvidence, ToolResult
+
+    tools = [
+        ToolEvidence(
+            number=i,
+            name="dp_accountant",
+            result=ToolResult(ok=True, data={}, source="dp_accounting"),
+        )
+        for i in (1, 2)
+    ]
+    p = parse_citations(
+        "RDP and PLD differ [T1][T2]. Made up [T7]. LiRA [2].", _sources(), tools=tools
+    )
+    assert p.raw_text == "RDP and PLD differ [T1][T2]. Made up. LiRA [2]."
+    assert "differ (dp_accountant [T1][T2])." in p.text and "[T7]" not in p.text
+    assert [c.number for c in p.tool_citations] == [1, 2]
+    assert [e.marker for e in p.errors] == ["[T7]"]

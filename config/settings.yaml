@@ -19,6 +19,7 @@ paths:
   processed_dir: data/processed
   strategies_file: config/strategies.yaml
   cache_dir: data/cache
+  audit_log: data/logs/tool_audit.jsonl
 
 limits:
   max_question_chars: 2000
@@ -72,6 +73,26 @@ generation:
   datamarking: false
   datamark_char: "\u02C6"
   excerpt_chars: 300
+
+agent:
+  # Strategy name from config/strategies.yaml used by search_knowledge_base (rerank
+  # strategies are slow on CPU, see retrieval.reranker_model).
+  default_strategy: hybrid
+  history_turns: 6            # completed earlier turns passed to the model
+  max_tool_calls_per_turn: 6  # hard cap (validated <= 6)
+  max_agent_steps: 6          # agent model calls per turn
+  max_tool_result_chars: 6000
+
+security:
+  max_token_chars: 200        # reject single whitespace-free tokens longer than this
+  injection:
+    warn_threshold: 0.4
+    block_threshold: 0.8
+    # Optional classifier on top of the heuristics (Apache-2.0, not gated; checked
+    # 2026-11-21 on huggingface.co). Downloaded on first use.
+    classifier_enabled: false
+    classifier_model: protectai/deberta-v3-base-prompt-injection-v2
+    classifier_max_length: 512
 
 logging:
   level: INFO

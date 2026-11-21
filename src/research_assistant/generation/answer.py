@@ -20,6 +20,7 @@ import time
 from collections.abc import Sequence
 from functools import lru_cache
 from itertools import groupby
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,9 +38,12 @@ from research_assistant.models import (
     Chunk,
     Citation,
     CitationError,
-    RetrievalResult,
+    RetrievalTrace,
     ScoredChunk,
     Source,
+    TokenUsage,
+    ToolCitation,
+    ToolEvidence,
 )
 from research_assistant.retrieval.strategies import (
     RetrievalDeps,
@@ -130,6 +134,12 @@ _NUM = re.compile(r"\d+")
 _WS = re.compile(r"\s+")
 
 
+_TOOL_MARKER = re.compile(r"(?P<pre>[ \t]*)\[T(?P<n>[1-9]\d*)\]")
+# A run of adjacent tool markers, e.g. "[T1][T2]" or "[T1] [T2]" (rendered as one group).
+_TOOL_RUN = re.compile(r"(?P<pre>[ \t]*)(?P<run>\[T[1-9]\d*\](?:[ \t]*\[T[1-9]\d*\])*)")
+_TOOL_NUM = re.compile(r"\[T(\d+)\]")
+
+
 class ParsedCitations(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -137,6 +147,7 @@ class ParsedCitations(BaseModel):
     text: str
     citations: list[Citation]
     errors: list[CitationError]
+    tool_citations: list[ToolCitation] = []
 
 
 def make_excerpt(text: str, max_chars: int) -> str:
@@ -155,13 +166,67 @@ def _render_run(numbers: Sequence[int], by_number: dict[int, Source]) -> str:
     return "(" + "; ".join(parts) + ")"
 
 
-def parse_citations(
-    text: str, sources: Sequence[Source], excerpt_chars: int = 300
-) -> ParsedCitations:
-    """Validate ``[n]`` markers in model output and turn them into citations.
+def _parse_tool_markers(
+    raw: str, text: str, tools: Sequence[ToolEvidence]
+) -> tuple[str, str, list[ToolCitation], list[CitationError]]:
+    """Validate ``[Tn]`` markers: keep valid ones in ``raw``, render ``(name [Tn])`` in ``text``.
 
-    Markers whose number matches no source are removed (with the whitespace before them)
-    and reported as :class:`CitationError`. Citations are ordered by first use.
+    Invalid markers are removed from both and reported once.
+    """
+    by_number = {t.number: t for t in tools}
+    errors: list[CitationError] = []
+    cited: list[int] = []
+
+    def _raw(m: re.Match[str]) -> str:
+        n = int(m["n"])
+        if n not in by_number:
+            errors.append(
+                CitationError(
+                    marker=f"[T{n}]",
+                    number=n,
+                    reason=f"no tool result with this number ({len(tools)} tool results)",
+                )
+            )
+            logger.warning("Citation error: marker [T%d] refers to no tool result", n)
+            return ""
+        if n not in cited:
+            cited.append(n)
+        return m.group(0)
+
+    def _text(m: re.Match[str]) -> str:
+        numbers: list[int] = []
+        for n in (int(x) for x in _TOOL_NUM.findall(m["run"])):
+            if n in by_number and n not in numbers:
+                numbers.append(n)
+        if not numbers:
+            return ""
+        pre = m["pre"]
+        if not pre and m.start() > 0 and not m.string[m.start() - 1].isspace():
+            pre = " "
+        parts = [
+            f"{name} " + "".join(f"[T{n}]" for n in group)
+            for name, group in groupby(numbers, key=lambda n: by_number[n].name)
+        ]
+        return pre + "(" + "; ".join(parts) + ")"
+
+    new_raw = _TOOL_MARKER.sub(_raw, raw)
+    new_text = _TOOL_RUN.sub(_text, text)
+    citations = [
+        ToolCitation(number=n, name=by_number[n].name, ok=by_number[n].result.ok) for n in cited
+    ]
+    return new_raw, new_text, citations, errors
+
+
+def parse_citations(
+    text: str,
+    sources: Sequence[Source],
+    excerpt_chars: int = 300,
+    tools: Sequence[ToolEvidence] = (),
+) -> ParsedCitations:
+    """Validate ``[n]`` and ``[Tn]`` markers in model output and turn them into citations.
+
+    Markers whose number matches no source (or tool result) are removed (with the whitespace
+    before them) and reported as :class:`CitationError`. Citations are ordered by first use.
     """
     by_number = {s.number: s for s in sources}
     errors: list[CitationError] = []
@@ -219,11 +284,15 @@ def parse_citations(
                 url=ARXIV_ABS_URL.format(arxiv_id=c.arxiv_id),
             )
         )
+    raw_text, out_text, tool_citations, tool_errors = _parse_tool_markers(
+        "".join(raw_parts), "".join(out_parts), tools
+    )
     return ParsedCitations(
-        raw_text="".join(raw_parts).strip(),
-        text="".join(out_parts).strip(),
+        raw_text=raw_text.strip(),
+        text=out_text.strip(),
         citations=citations,
-        errors=errors,
+        errors=errors + tool_errors,
+        tool_citations=tool_citations,
     )
 
 
@@ -272,49 +341,68 @@ def default_answer_deps() -> AnswerDeps:
 # --------------------------------------------------------------------------- pipeline
 
 
-def _no_sources_answer(result: RetrievalResult, sink: EventSink, t0: float) -> Answer:
-    sink.token(NO_SOURCES_MESSAGE)
-    return Answer(
-        question=result.question,
-        text=NO_SOURCES_MESSAGE,
-        raw_text=NO_SOURCES_MESSAGE,
-        strategy=result.strategy,
-        retrieval=result.trace,
-        token_usage=result.trace.token_usage,
-        latency_ms=(time.perf_counter() - t0) * 1000,
-    )
-
-
-def answer(
+def generate_answer(
     question: str,
-    strategy: StrategyConfig | str,
+    chunks: Sequence[ScoredChunk | Chunk],
     sink: EventSink | None = None,
     deps: AnswerDeps | None = None,
+    *,
+    tool_results: Sequence[ToolEvidence] = (),
+    history: Sequence[tuple[str, str]] = (),
+    extra_system: str = "",
+    retrieval: RetrievalTrace | None = None,
+    strategy: str | None = None,
+    max_tool_chars: int = 6000,
 ) -> Answer:
-    """Answer ``question`` from the indexed papers with citations.
+    """Write a cited answer from already collected ``chunks`` and ``tool_results``.
 
-    Raises :class:`~research_assistant.retrieval.strategies.RetrievalError` for invalid
-    questions and :class:`GenerationError` if the LLM fails; both messages are user-safe.
+    Chunks become numbered sources ``[n]``, tool results spotlighted blocks ``[Tn]``.
+    Without either, the no-sources message is returned and the LLM is not called. Raises
+    :class:`GenerationError` (user-safe message) if the LLM fails.
     """
     t0 = time.perf_counter()
     sink = sink or NullSink()
     deps = deps or default_answer_deps()
-    result = retrieve(question, strategy, sink, deps.retrieval)
-    if not result.chunks:
-        return _no_sources_answer(result, sink, t0)
+    retrieval_usage = retrieval.token_usage if retrieval is not None else TokenUsage()
+    name = strategy or "direct"
+
+    if not chunks and not tool_results:
+        sink.token(NO_SOURCES_MESSAGE)
+        return Answer(
+            question=question,
+            text=NO_SOURCES_MESSAGE,
+            raw_text=NO_SOURCES_MESSAGE,
+            strategy=strategy,
+            retrieval=retrieval,
+            token_usage=retrieval_usage,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+        )
 
     cfg = deps.config
-    sources = make_sources(result.chunks)
+    sources = make_sources(chunks)
     boundary = new_boundary()
     system, user = build_messages(
-        result.question, sources, boundary, cfg.datamarking, cfg.datamark_char
+        question,
+        sources,
+        boundary,
+        cfg.datamarking,
+        cfg.datamark_char,
+        tool_results=tool_results,
+        history=history,
+        extra_system=extra_system,
+        max_tool_chars=max_tool_chars,
     )
 
-    step_id = f"generation:{result.strategy}:generate"
+    step_id = f"generation:{name}:generate"
     sink.step_started(
         step_id,
         "generate",
-        {"n_sources": len(sources), "model": deps.model_name, "datamarking": cfg.datamarking},
+        {
+            "n_sources": len(sources),
+            "n_tool_results": len(tool_results),
+            "model": deps.model_name,
+            "datamarking": cfg.datamarking,
+        },
     )
     g0 = time.perf_counter()
     try:
@@ -335,32 +423,62 @@ def answer(
         },
     )
 
-    cite_id = f"generation:{result.strategy}:cite"
+    cite_id = f"generation:{name}:cite"
     sink.step_started(cite_id, "cite", {"n_sources": len(sources)})
-    parsed = parse_citations(streamed.text, sources, cfg.excerpt_chars)
+    parsed = parse_citations(streamed.text, sources, cfg.excerpt_chars, tool_results)
+    cite_out: dict[str, Any] = {
+        "citations": [c.number for c in parsed.citations],
+        "errors": [e.marker for e in parsed.errors],
+    }
+    if tool_results:
+        cite_out["tool_citations"] = [f"T{c.number}" for c in parsed.tool_citations]
     sink.step_finished(
         cite_id,
-        {
-            "citations": [c.number for c in parsed.citations],
-            "errors": [e.marker for e in parsed.errors],
-        },
+        cite_out,
         {"n_citations": len(parsed.citations), "n_errors": len(parsed.errors)},
     )
 
     return Answer(
-        question=result.question,
+        question=question,
         text=parsed.text,
         raw_text=parsed.raw_text,
         citations=parsed.citations,
         citation_errors=parsed.errors,
-        strategy=result.strategy,
-        retrieval=result.trace,
+        tool_citations=parsed.tool_citations,
+        strategy=strategy,
+        retrieval=retrieval,
         model=streamed.model or deps.model_name,
-        token_usage=result.trace.token_usage + streamed.usage,
+        token_usage=retrieval_usage + streamed.usage,
         generation_token_usage=streamed.usage,
         latency_ms=(time.perf_counter() - t0) * 1000,
         generation_latency_ms=gen_ms,
     )
+
+
+def answer(
+    question: str,
+    strategy: StrategyConfig | str,
+    sink: EventSink | None = None,
+    deps: AnswerDeps | None = None,
+) -> Answer:
+    """Answer ``question`` from the indexed papers with citations.
+
+    Raises :class:`~research_assistant.retrieval.strategies.RetrievalError` for invalid
+    questions and :class:`GenerationError` if the LLM fails; both messages are user-safe.
+    """
+    t0 = time.perf_counter()
+    sink = sink or NullSink()
+    deps = deps or default_answer_deps()
+    result = retrieve(question, strategy, sink, deps.retrieval)
+    ans = generate_answer(
+        result.question,
+        result.chunks,
+        sink,
+        deps,
+        retrieval=result.trace,
+        strategy=result.strategy,
+    )
+    return ans.model_copy(update={"latency_ms": (time.perf_counter() - t0) * 1000})
 
 
 __all__ = [
@@ -370,6 +488,7 @@ __all__ = [
     "answer",
     "author_year_label",
     "default_answer_deps",
+    "generate_answer",
     "make_excerpt",
     "make_sources",
     "parse_citations",

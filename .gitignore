@@ -25,3 +25,6 @@ build/
 
 # Data caches
 data/cache/
+
+# Logs (tool-call audit log)
+data/logs/

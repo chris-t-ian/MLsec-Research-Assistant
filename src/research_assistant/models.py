@@ -187,6 +187,23 @@ class CitationError(_Frozen):
     reason: str
 
 
+class ToolEvidence(_Frozen):
+    """A tool result passed to the answer generator as spotlighted block ``[T<number>]``."""
+
+    number: int = Field(ge=1)
+    name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    result: ToolResult
+
+
+class ToolCitation(_Frozen):
+    """A tool result cited in an answer with the marker ``[T<number>]``."""
+
+    number: int = Field(ge=1)
+    name: str
+    ok: bool
+
+
 class Answer(_Frozen):
     question: str
     text: str = Field(description="Answer with markers rendered as '(Shokri et al. 2017 [1])'.")
@@ -195,6 +212,7 @@ class Answer(_Frozen):
     )
     citations: list[Citation] = Field(default_factory=list)
     citation_errors: list[CitationError] = Field(default_factory=list)
+    tool_citations: list[ToolCitation] = Field(default_factory=list)
     strategy: str | None = None
     retrieval: RetrievalTrace | None = None
     model: str | None = None
@@ -302,3 +320,23 @@ class IngestRequest(_Frozen):
     status: IngestStatus = "pending_confirmation"
     already_in_kb: bool = False
     message: str = ""
+
+
+# --------------------------------------------------------------------------- security
+
+SecurityEventKind = Literal[
+    "input_rejected",  # input validation failed
+    "injection_warn",  # possible prompt injection, turn continued
+    "injection_block",  # prompt injection, turn blocked
+    "canary_leak",  # the session canary appeared in model output or tool arguments
+    "tool_denied",  # the tool policy refused a tool call
+    "tool_limit",  # the per-turn tool-call limit was reached
+]
+
+
+class SecurityEvent(_Frozen):
+    """A security-relevant decision during one turn (shown in traces, logged)."""
+
+    kind: SecurityEventKind
+    detail: str = Field(description="Short, user-safe description (never contains secrets).")
+    score: float | None = None

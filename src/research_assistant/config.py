@@ -41,6 +41,8 @@ class PathsConfig(BaseModel):
     processed_dir: Path = Path("data/processed")
     strategies_file: Path = Path("config/strategies.yaml")
     cache_dir: Path = Path("data/cache")
+    # JSONL audit log of every agent tool call (see research_assistant.security.tool_policy).
+    audit_log: Path = Path("data/logs/tool_audit.jsonl")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -55,6 +57,7 @@ class PathsConfig(BaseModel):
             processed_dir=_abs(self.processed_dir),
             strategies_file=_abs(self.strategies_file),
             cache_dir=_abs(self.cache_dir),
+            audit_log=_abs(self.audit_log),
         )
 
 
@@ -130,6 +133,43 @@ class GenerationConfig(BaseModel):
     excerpt_chars: int = Field(default=300, gt=0)
 
 
+class AgentConfig(BaseModel):
+    """LangGraph agent (see research_assistant.agent.graph)."""
+
+    default_strategy: str = Field(default="hybrid", pattern=r"^[a-z0-9_]+$")
+    # Completed earlier turns (question + final answer) passed to the model.
+    history_turns: int = Field(default=6, ge=0, le=50)
+    # Hard cap per turn; the policy never allows more than this many tool calls.
+    max_tool_calls_per_turn: int = Field(default=6, ge=1, le=6)
+    # Agent model calls per turn (each may request several tool calls).
+    max_agent_steps: int = Field(default=6, ge=1, le=20)
+    # Characters of one tool result shown to the model (JSON, spotlighted).
+    max_tool_result_chars: int = Field(default=6000, gt=0)
+
+
+class InjectionConfig(BaseModel):
+    """Prompt-injection detection on user input."""
+
+    warn_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    block_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    # Optional Hugging Face classifier (Apache-2.0, downloaded on first use).
+    classifier_enabled: bool = False
+    classifier_model: str = "protectai/deberta-v3-base-prompt-injection-v2"
+    classifier_max_length: int = Field(default=512, gt=0)
+
+    @model_validator(mode="after")
+    def _check_thresholds(self) -> InjectionConfig:
+        if self.warn_threshold > self.block_threshold:
+            raise ValueError("warn_threshold must not exceed block_threshold")
+        return self
+
+
+class SecurityConfig(BaseModel):
+    injection: InjectionConfig = InjectionConfig()
+    # Single whitespace-free tokens longer than this are rejected (obfuscation, payloads).
+    max_token_chars: int = Field(default=200, gt=0)
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -159,6 +199,8 @@ class Settings(BaseSettings):
     arxiv: ArxivConfig = ArxivConfig()
     semantic_scholar: SemanticScholarConfig = SemanticScholarConfig()
     generation: GenerationConfig = GenerationConfig()
+    agent: AgentConfig = AgentConfig()
+    security: SecurityConfig = SecurityConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
