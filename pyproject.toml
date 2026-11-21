@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
+    "dp-accounting>=0.6.0",
     "httpx>=0.28.1",
     "langchain-core>=1.8.3",
     "langchain-openai>=1.8.3",
@@ -29,6 +30,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.17",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",

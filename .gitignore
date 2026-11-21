@@ -22,3 +22,6 @@ build/
 
 # OS
 .DS_Store
+
+# Data caches
+data/cache/

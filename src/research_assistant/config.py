@@ -40,6 +40,7 @@ class PathsConfig(BaseModel):
     papers_file: Path = Path("data/papers.yaml")
     processed_dir: Path = Path("data/processed")
     strategies_file: Path = Path("config/strategies.yaml")
+    cache_dir: Path = Path("data/cache")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -53,6 +54,7 @@ class PathsConfig(BaseModel):
             papers_file=_abs(self.papers_file),
             processed_dir=_abs(self.processed_dir),
             strategies_file=_abs(self.strategies_file),
+            cache_dir=_abs(self.cache_dir),
         )
 
 
@@ -68,6 +70,17 @@ class ArxivConfig(BaseModel):
     max_download_mb: int = Field(default=100, gt=0)
     max_extract_mb: int = Field(default=500, gt=0)
     user_agent: str = "research-assistant-corpus/0.1"
+
+
+class SemanticScholarConfig(BaseModel):
+    api_url: str = "https://api.semanticscholar.org/graph/v1"
+    timeout_s: float = Field(default=30.0, gt=0)
+    max_retries: int = Field(default=4, ge=0)
+    backoff_s: float = Field(default=2.0, ge=0)
+    # Keyed access is limited to 1 request/s; unauthenticated traffic shares a global pool.
+    min_interval_s: float = Field(default=1.0, ge=0)
+    cache_ttl_h: float = Field(default=24.0, ge=0)
+    user_agent: str = "research-assistant/0.1"
 
 
 class LimitsConfig(BaseModel):
@@ -144,6 +157,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalConfig = RetrievalConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     arxiv: ArxivConfig = ArxivConfig()
+    semantic_scholar: SemanticScholarConfig = SemanticScholarConfig()
     generation: GenerationConfig = GenerationConfig()
     logging: LoggingConfig = LoggingConfig()
 
@@ -190,5 +204,5 @@ def configure_logging(level: str = "INFO") -> None:
     else:
         root.setLevel(numeric)
     # Keep noisy HTTP client logs (which may include URLs/headers) quiet.
-    for noisy in ("httpx", "httpx2", "httpcore", "openai", "pylatexenc", "pdfminer"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "pylatexenc", "pdfminer", "absl"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

@@ -18,6 +18,7 @@ paths:
   papers_file: data/papers.yaml
   processed_dir: data/processed
   strategies_file: config/strategies.yaml
+  cache_dir: data/cache
 
 limits:
   max_question_chars: 2000
@@ -55,6 +56,14 @@ arxiv:
   backoff_s: 3
   max_download_mb: 100
   max_extract_mb: 500
+
+semantic_scholar:
+  api_url: https://api.semanticscholar.org/graph/v1
+  timeout_s: 30
+  max_retries: 4
+  backoff_s: 2          # exponential backoff base on 429 / 5xx / timeouts
+  min_interval_s: 1.0   # keyed access: 1 request per second
+  cache_ttl_h: 24       # citation_graph disk cache lifetime
 
 generation:
   # Spotlighting: sources are always wrapped in delimiters with a random per-request boundary.

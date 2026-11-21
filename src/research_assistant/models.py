@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal, Self
+from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -269,3 +269,36 @@ class ParsedDocument(_Frozen):
     def full_text(self) -> str:
         """All section texts joined; chunk char offsets refer to this string."""
         return self.SECTION_SEPARATOR.join(s.text for s in self.sections)
+
+
+# --------------------------------------------------------------------------- tools
+
+ToolSource = Literal["arxiv", "semantic_scholar", "dp_accounting", "knowledge_base", "validation"]
+
+
+class ToolResult(_Frozen):
+    """Uniform result of every agent tool. Tools never raise; failures set ``ok=False``."""
+
+    ok: bool
+    data: Any = Field(default=None, description="JSON-serializable payload when ok.")
+    error: str | None = Field(default=None, description="User-safe error message when not ok.")
+    source: ToolSource
+
+    @model_validator(mode="after")
+    def _check_error(self) -> Self:
+        if self.ok == (self.error is not None):
+            raise ValueError("error must be set exactly when ok is False")
+        return self
+
+
+IngestStatus = Literal["pending_confirmation", "completed", "failed"]
+
+
+class IngestRequest(_Frozen):
+    """A proposal to add a paper to the knowledge base; nothing happens until confirmed."""
+
+    arxiv_id: str = Field(min_length=1, description="Versionless arXiv ID, e.g. '2112.03570'.")
+    requested_id: str = Field(description="The ID as given, e.g. '2112.03570v2'.")
+    status: IngestStatus = "pending_confirmation"
+    already_in_kb: bool = False
+    message: str = ""
