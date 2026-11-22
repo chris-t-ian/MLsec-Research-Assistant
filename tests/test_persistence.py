@@ -144,3 +144,27 @@ def test_check_demo_credentials(user: str, pw: str, ok: bool) -> None:
 @pytest.mark.parametrize(("user", "pw"), [(None, None), ("demo", None), ("demo", ""), ("", "x")])
 def test_login_fails_without_configured_credentials(user: str | None, pw: str | None) -> None:
     assert check_demo_credentials(user or "", pw or "", _settings(user, pw)) is False
+
+
+def test_threads_are_not_auto_tagged() -> None:
+    # Regression: with auto_tag_thread the browser's chat profile is passed as a Python list
+    # to SQLite, the thread upsert fails silently, and threads get no owner -> empty sidebar.
+    import tomllib
+
+    config = Path(__file__).resolve().parents[1] / ".chainlit" / "config.toml"
+    features = tomllib.loads(config.read_text(encoding="utf-8"))["features"]
+    assert features["auto_tag_thread"] is False
+
+
+async def test_thread_gets_owner_and_name_without_tags(tmp_path: Path) -> None:
+    dl = SQLAlchemyDataLayer(conninfo=sqlalchemy_url(init_db(tmp_path / "chat.db")))
+    try:
+        user = await dl.create_user(User(identifier="demo"))
+        assert user is not None
+        await dl.update_thread("t1")  # as create_step does first
+        await dl.update_thread("t1", name="Question", user_id=user.id, tags=None)
+        thread = await dl.get_thread("t1")
+        assert thread is not None
+        assert (thread["userIdentifier"], thread["name"]) == ("demo", "Question")
+    finally:
+        await dl.close()

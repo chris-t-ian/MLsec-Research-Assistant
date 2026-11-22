@@ -9,8 +9,7 @@ data/processed/
 # Chainlit
 .files/
 .chainlit/translations/
-chainlit.db
-chainlit.db-*
+chainlit.db*
 
 # Python
 __pycache__/
