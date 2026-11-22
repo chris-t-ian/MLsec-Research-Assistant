@@ -7,13 +7,20 @@ from research_assistant.agent.graph import (
     confirm_pending_ingest,
     run_turn,
 )
-from research_assistant.agent.state import SessionState, ToolCallOutcome, TraceStep, TurnResult
+from research_assistant.agent.state import (
+    SessionState,
+    SourceRef,
+    ToolCallOutcome,
+    TraceStep,
+    TurnResult,
+)
 
 __all__ = [
     "AgentConfigError",
     "AgentDeps",
     "ResearchAgent",
     "SessionState",
+    "SourceRef",
     "ToolCallOutcome",
     "TraceStep",
     "TurnResult",

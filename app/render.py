@@ -10,6 +10,7 @@ it is put into markdown, and links are only built from validated arXiv IDs / DOI
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -18,11 +19,15 @@ from typing import Any
 from urllib.parse import quote
 
 import chainlit as cl
+import plotly.graph_objects as go
 from chainlit.utils import utc_now
+from plotly.subplots import make_subplots
 
 from research_assistant.agent import TurnResult
+from research_assistant.app_guide import GuideAnswer, HelpSection, help_ref_name
 from research_assistant.generation.answer import citation_ref_name, render_with_references
 from research_assistant.models import Citation, SecurityEvent, ToolResult
+from research_assistant.rag_trace import CandidateRow, RagTrace, SearchView
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +110,8 @@ STEP_LABELS = {
     # generation
     "generate": "Generate answer",
     "cite": "Check citations",
+    # App Guide
+    "guide_search": "Search help page",
     # ingest
     "fetch": "Download from arXiv",
     "parse_scan": "Parse and scan for hidden injections",
@@ -240,6 +247,9 @@ def format_step_output(name: str, output: Any, metadata: Mapping[str, Any] | Non
             lines.append(f"⚠️ {md(out['error'])}")
         else:
             lines.append(f"{out.get('chars', 0)} characters from {md(meta.get('model') or '')}")
+    elif name == "guide_search":
+        sections = out.get("sections") or []
+        lines.append("Help sections: " + (", ".join(md(t) for t in sections) or "none"))
     elif name == "cite":
         cited = ", ".join(f"[{n}]" for n in out.get("citations", [])) or "none"
         lines.append(f"Cited sources: {cited}")
@@ -638,3 +648,360 @@ def run_summary(result: TurnResult) -> str:
         parts.append(md(result.model))
     parts.append(f"{result.latency_ms / 1000:.1f} s")
     return " · ".join(parts)
+
+
+# --------------------------------------------------------------------------- RAG view
+
+RAG_STEP_NAME = "How this answer was built"
+
+# Categorical slots in fixed order (validated palette, light steps; they also clear 3:1 on the
+# dark Chainlit surface). Slot 8 is replaced by a neutral gray for "Other papers".
+PAPER_COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6")
+OTHER_COLOR = "#8c8b86"
+OTHER_PAPERS = "Other papers"
+# Latency groups keep one color each (color follows the entity, not the rank).
+GROUP_COLORS = {
+    "security": "#1baf7a",
+    "agent": "#6250d6",
+    "retrieval": "#2a78d6",
+    "tools": "#eda100",
+    "generation": "#eb6834",
+}
+GROUP_LABELS = {
+    "security": "Security checks",
+    "agent": "Agent",
+    "retrieval": "Retrieval",
+    "tools": "Tools / overhead",
+    "generation": "Generation",
+}
+# Light-mode ink; public/custom.css re-inks chart text for dark mode.
+CHART_INK = "#52514e"
+CHART_GRID = "rgba(128, 128, 128, 0.22)"
+MAX_CHART_ROWS = 25
+
+# (field, panel title, reversed axis). BM25 scores are not comparable across queries, so the
+# rank is shown; its axis is reversed so that "better" is to the right in every panel.
+STAGE_PANELS: tuple[tuple[str, str, bool], ...] = (
+    ("dense_score", "Dense score (cosine)", False),
+    ("bm25_rank", "BM25 rank", True),
+    ("rrf_score", "RRF score", False),
+    ("rerank_score", "Rerank score", False),
+)
+STATUS_STYLE = {
+    # status: (symbol, size, opacity, legend text)
+    "cited": ("circle", 12, 1.0, "cited in the answer"),
+    "unused": ("circle-open", 12, 1.0, "given to the model, not cited"),
+    "not_selected": ("circle", 7, 0.45, "candidate, not selected"),
+}
+TRANSLATION_LABELS = {
+    "multi_query": "Paraphrases (multi-query)",
+    "hyde": "Hypothetical passage (HyDE)",
+    "decompose": "Sub-questions (decomposition)",
+}
+
+
+def plain(text: Any, max_chars: int = 120) -> str:
+    """Untrusted text for Plotly labels: Plotly renders some HTML tags (incl. links), so
+    entities are escaped (Plotly decodes them for display, as plain text)."""
+    flat = _WS.sub(" ", str(text if text is not None else "")).strip()
+    if len(flat) > max_chars:
+        flat = flat[: max_chars - 1].rstrip() + "…"
+    return html.escape(flat, quote=False)
+
+
+def _short_chunk(chunk_id: str) -> str:
+    """``1610.05820:3:12`` -> ``s3·c12`` (section and chunk index)."""
+    parts = chunk_id.split(":")
+    if len(parts) == 3:
+        return f"s{parts[1]}·c{parts[2]}"
+    return chunk_id[-12:]
+
+
+def candidate_label(row: CandidateRow) -> str:
+    if row.source_number is not None:
+        return plain(f"[{row.source_number}] {row.paper_label}", 60)
+    return plain(f"{row.paper_label} · {_short_chunk(row.chunk_id)}", 60)
+
+
+def paper_colors(rows: Sequence[CandidateRow]) -> dict[str, tuple[str, str]]:
+    """arXiv ID -> (legend name, color); papers beyond the palette share the gray 'Other'."""
+    out: dict[str, tuple[str, str]] = {}
+    for r in rows:
+        if r.arxiv_id in out:
+            continue
+        i = len([v for v in out.values() if v[0] != OTHER_PAPERS])
+        if i < len(PAPER_COLORS):
+            out[r.arxiv_id] = (plain(r.paper_label, 40), PAPER_COLORS[i])
+        else:
+            out[r.arxiv_id] = (OTHER_PAPERS, OTHER_COLOR)
+    return out
+
+
+def _fmt_opt(value: float | int | None, digits: int = 4) -> str:
+    if value is None:
+        return "-"
+    return str(value) if isinstance(value, int) else f"{value:.{digits}g}"
+
+
+def _hover(row: CandidateRow) -> str:
+    status = STATUS_STYLE[row.status][3]
+    return (
+        f"<b>{candidate_label(row)}</b><br>"
+        f"chunk {plain(row.chunk_id, 40)} · {status}<br>"
+        f"dense {_fmt_opt(row.dense_score)} · BM25 rank {_fmt_opt(row.bm25_rank)}<br>"
+        f"RRF {_fmt_opt(row.rrf_score)} · rerank {_fmt_opt(row.rerank_score)}<br>"
+        f"final rank {_fmt_opt(row.final_rank)}"
+    )
+
+
+def _base_layout(fig: go.Figure, height: int) -> None:
+    fig.update_layout(
+        height=height,
+        margin={"l": 8, "r": 16, "t": 40, "b": 8},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": "Inter, system-ui, sans-serif", "size": 12, "color": CHART_INK},
+        hoverlabel={"font": {"size": 12}, "align": "left"},
+        legend={"orientation": "h", "yanchor": "top", "y": -0.04, "x": 0, "font": {"size": 11}},
+    )
+    fig.update_xaxes(gridcolor=CHART_GRID, zeroline=False, linecolor=CHART_GRID)
+    fig.update_yaxes(gridcolor=CHART_GRID, zeroline=False, linecolor=CHART_GRID)
+
+
+def candidates_figure(search: SearchView, max_rows: int = MAX_CHART_ROWS) -> go.Figure | None:
+    """One panel per stage that ran, one row per candidate chunk, colored by paper."""
+    rows = search.candidates[:max_rows]
+    panels = [p for p in STAGE_PANELS if any(getattr(r, p[0]) is not None for r in rows)]
+    if not rows or not panels:
+        return None
+    colors = paper_colors(rows)
+    labels = [candidate_label(r) for r in rows]
+    fig = make_subplots(
+        rows=1,
+        cols=len(panels),
+        shared_yaxes=True,
+        horizontal_spacing=0.03,
+        subplot_titles=[p[1] for p in panels],
+    )
+    for col, (field, _title, reverse) in enumerate(panels, start=1):
+        by_paper: dict[str, list[CandidateRow]] = {}
+        for r in rows:
+            if getattr(r, field) is not None:
+                by_paper.setdefault(colors[r.arxiv_id][0], []).append(r)
+        for name, group in by_paper.items():
+            color = colors[group[0].arxiv_id][1]
+            fig.add_trace(
+                go.Scatter(
+                    x=[getattr(r, field) for r in group],
+                    y=[candidate_label(r) for r in group],
+                    mode="markers",
+                    name=name,
+                    legendgroup=name,
+                    showlegend=False,
+                    marker={
+                        "color": color,
+                        "symbol": [STATUS_STYLE[r.status][0] for r in group],
+                        "size": [STATUS_STYLE[r.status][1] for r in group],
+                        "opacity": [STATUS_STYLE[r.status][2] for r in group],
+                        "line": {"width": 2, "color": color},
+                    },
+                    hovertext=[_hover(r) for r in group],
+                    hoverinfo="text",
+                ),
+                row=1,
+                col=col,
+            )
+        if reverse:
+            fig.update_xaxes(autorange="reversed", row=1, col=col)
+    # Legend: one entry per paper, then the marker styles (identity is never color alone:
+    # rows are labeled with the paper, and the status uses marker shape and size).
+    seen: set[str] = set()
+    for name, color in colors.values():
+        if name in seen:
+            continue
+        seen.add(name)
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                name=name,
+                legendgroup=name,
+                marker={"color": color, "size": 10},
+            )
+        )
+    for symbol, size, opacity, text in STATUS_STYLE.values():
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                name=text,
+                marker={
+                    "color": OTHER_COLOR,
+                    "symbol": symbol,
+                    "size": size,
+                    "opacity": opacity,
+                    "line": {"width": 2, "color": OTHER_COLOR},
+                },
+            )
+        )
+    _base_layout(fig, height=140 + 24 * len(rows))
+    fig.update_yaxes(
+        categoryorder="array", categoryarray=labels, autorange="reversed", tickfont={"size": 11}
+    )
+    fig.update_annotations(font={"size": 12, "color": CHART_INK})
+    return fig
+
+
+def latency_figure(trace: RagTrace) -> go.Figure | None:
+    """Horizontal bars: wall time per pipeline stage, in pipeline order (top to bottom)."""
+    stages = trace.latencies
+    if not stages:
+        return None
+    fig = go.Figure()
+    for group, color in GROUP_COLORS.items():
+        items = [s for s in stages if s.group == group]
+        if not items:
+            continue
+        fig.add_trace(
+            go.Bar(
+                x=[s.latency_ms / 1000 for s in items],
+                y=[s.label for s in items],
+                orientation="h",
+                name=GROUP_LABELS[group],
+                marker={"color": color, "cornerradius": 4},
+                text=[fmt_seconds(s.latency_ms) for s in items],
+                textposition="outside",
+                cliponaxis=False,
+                hovertemplate="%{y}: %{x:.2f} s<extra></extra>",
+            )
+        )
+    _base_layout(fig, height=120 + 30 * len(stages))
+    fig.update_layout(
+        bargap=0.35,
+        margin={"t": 64},
+        title={"text": "Latency per stage", "font": {"size": 13}, "y": 0.98, "yanchor": "top"},
+        legend={"y": 1.0, "yanchor": "bottom", "x": 0, "xanchor": "left"},
+    )
+    fig.update_yaxes(
+        categoryorder="array",
+        categoryarray=[s.label for s in stages],
+        autorange="reversed",
+        gridcolor="rgba(0,0,0,0)",
+    )
+    fig.update_xaxes(ticksuffix=" s", rangemode="tozero")
+    return fig
+
+
+def fmt_seconds(ms: float) -> str:
+    return f"{ms / 1000:.1f} s" if ms >= 100 else f"{ms:.0f} ms"
+
+
+def _search_markdown(s: SearchView, n_searches: int) -> str:
+    head = f"**Search {s.number}**" if n_searches > 1 else "**Knowledge-base search**"
+    lines = [f"{head} · strategy `{md(s.strategy)}` · {fmt_seconds(s.latency_ms)}"]
+    lines.append(f"- Query: {md(s.question, 400)}")
+    if s.semantic_query and s.semantic_query != s.question:
+        lines.append(f"- Search query after self-query: {md(s.semantic_query, 400)}")
+    if s.query_translation and s.query_translation != "none":
+        label = TRANSLATION_LABELS.get(s.query_translation, md(s.query_translation))
+        if s.rewrites:
+            lines.append(f"- {label}:")
+            limit = 600 if s.query_translation == "hyde" else 300
+            lines += [f"    {i}. {md(r, limit)}" for i, r in enumerate(s.rewrites, 1)]
+        else:
+            lines.append(f"- {label}: none (original query used)")
+    else:
+        lines.append("- Rewrites: none (strategy searches with the query as is)")
+    if "self_query" in s.stages:
+        filters = s.filters.model_dump() if s.filters is not None else None
+        lines.append(f"- Extracted filters: {_filters_text(filters)}")
+    else:
+        lines.append("- Filters: not used by this strategy")
+    shown = min(len(s.candidates), MAX_CHART_ROWS)
+    lines.append(
+        f"- Candidates: {s.n_candidates_total} unique chunks across stages "
+        f"(chart shows the top {shown})"
+    )
+    lines += [f"- _Note: {md(n, 300)}_" for n in s.notes]
+    return "\n".join(lines)
+
+
+def _source_line(src: Any) -> str:
+    section = f" · {md(src.section, 80)}" if src.section else ""
+    return f"- **[{src.number}] {md(src.label)}**: {md(src.title, 140)}{section}"
+
+
+def rag_markdown(trace: RagTrace) -> str:
+    """Text part of the RAG view: rewrites and filters per search, cited vs. unused sources."""
+    parts: list[str] = []
+    if trace.searches:
+        parts += [_search_markdown(s, len(trace.searches)) for s in trace.searches]
+    else:
+        parts.append(
+            "_No knowledge-base search in this turn, so there is no candidates chart; the "
+            "answer is based on tool results only._"
+        )
+    if trace.sources:
+        cited, unused = trace.cited, trace.unused
+        lines = [f"**Sources given to the answer model:** {len(cited)} cited, {len(unused)} unused"]
+        if cited:
+            lines.append("\n✅ **Cited**")
+            lines += [_source_line(s) for s in cited]
+        if unused:
+            lines.append("\n○ **Retrieved but not cited**")
+            lines += [_source_line(s) for s in unused]
+        parts.append("\n".join(lines))
+    if trace.searches:
+        parts.append(
+            "_Charts below: candidates per stage (filled = cited, open = unused, faint = not "
+            "selected; further right is better) and latency per stage._"
+        )
+    else:
+        parts.append("_Chart below: latency per stage._")
+    return "\n\n".join(parts)
+
+
+def rag_elements(trace: RagTrace) -> list[cl.Plotly]:
+    elements: list[cl.Plotly] = []
+    for s in trace.searches:
+        fig = candidates_figure(s)
+        if fig is not None:
+            suffix = f" (search {s.number})" if len(trace.searches) > 1 else ""
+            elements.append(
+                cl.Plotly(
+                    name=f"Candidates per stage{suffix}", figure=fig, display="inline", size="large"
+                )
+            )
+    fig = latency_figure(trace)
+    if fig is not None:
+        elements.append(
+            cl.Plotly(name="Latency per stage", figure=fig, display="inline", size="large")
+        )
+    return elements
+
+
+def rag_summary(trace: RagTrace) -> str:
+    n = len(trace.searches)
+    bits = [f"{n} search{'es' if n != 1 else ''}"]
+    if trace.sources:
+        bits.append(f"{len(trace.cited)}/{len(trace.sources)} sources cited")
+    bits.append(fmt_seconds(trace.total_latency_ms))
+    return " · ".join(bits)
+
+
+# --------------------------------------------------------------------------- App Guide
+
+
+def help_element(section: HelpSection) -> cl.Text:
+    """Side-panel element for a cited help section (help.md is our own trusted text)."""
+    return cl.Text(
+        name=help_ref_name(section),
+        content=f"**{section.title}**\n\n{section.text}",
+        display="side",
+    )
+
+
+def guide_markdown(ans: GuideAnswer) -> str:
+    return ans.text

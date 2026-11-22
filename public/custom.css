@@ -1,0 +1,62 @@
+/* Research Assistant: custom styles on top of public/theme.json (light + dark).
+   Colors use the theme variables, so both modes follow theme.json. */
+
+/* Citation badges: the "[n] Author et al. YEAR" references in answers (Chainlit element
+   links) become accent-tinted pills. Chainlit uppercases them by default, which mangles
+   author names; keep the original case. */
+a.element-link {
+  text-transform: none !important;
+  transform: none !important;
+  background-color: hsl(var(--primary) / 0.1) !important;
+  color: hsl(var(--primary)) !important;
+  border: 1px solid hsl(var(--primary) / 0.35);
+  border-radius: 999px !important;
+  padding: 0 0.5rem !important;
+  margin: 0 0.1rem;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  line-height: 1.35rem;
+  white-space: nowrap;
+  vertical-align: baseline;
+  text-decoration: none !important;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+a.element-link:hover,
+a.element-link:focus-visible {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  outline: none;
+}
+
+a.element-link:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.5);
+}
+
+/* Plotly charts (RAG view): figures carry light-mode ink; in dark mode re-ink axis, legend
+   and title text. Hover labels keep Plotly's own contrast handling. */
+.dark .js-plotly-plot .cartesianlayer text,
+.dark .js-plotly-plot .infolayer text,
+.dark .js-plotly-plot .annotation-text {
+  fill: hsl(50 6% 78%) !important;
+}
+
+.dark .js-plotly-plot .modebar-btn path {
+  fill: hsl(50 6% 60%) !important;
+}
+
+/* Chainlit wraps inline Plotly charts in a div with the inline style
+   "max-width: fit-content" while the chart itself is "width: 100%"; the two resolve to
+   almost zero, so the chart collapses to a thin vertical strip. Give the wrapper the full
+   width (an inline style can only be overridden with !important). */
+.inline-plotly-container {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Inline charts inside steps get a little air and a subtle frame. */
+.step .js-plotly-plot {
+  margin-top: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+}

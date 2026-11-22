@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from research_assistant.agent import graph as agent_graph
 from research_assistant.agent.graph import AgentDeps, ResearchAgent, run_turn, split_turns
-from research_assistant.agent.state import SessionState
+from research_assistant.agent.state import SessionState, TurnResult
 from research_assistant.config import GenerationConfig, get_settings
 from research_assistant.events import RecordingSink
 from research_assistant.generation.answer import AnswerDeps
@@ -448,3 +448,29 @@ def test_resolve_model_defaults_to_main_and_accepts_choices() -> None:
     assert deps.resolve_model(None) == settings.models.main
     for name in settings.models.choices():
         assert deps.resolve_model(name) == name
+
+
+def test_turn_records_rag_trace_data() -> None:
+    other = LIRA.model_copy(
+        update={"id": "1610.05820:2:0", "arxiv_id": "1610.05820", "text": "Shadow models."}
+    )
+    agent, _, _, _ = make_agent(
+        [
+            AIMessage(
+                content="", tool_calls=[call("search_knowledge_base", {"question": "LiRA"}, "c1")]
+            )
+        ],
+        reply="LiRA fits Gaussians to shadow-model losses [1].",
+        chunks=(LIRA, other),
+    )
+    res = run_turn("How does LiRA work?", session(), RecordingSink(), agent)
+    [trace] = res.retrievals
+    assert trace.strategy == "baseline_dense" and trace.retriever == "dense"
+    assert [s.chunk_id for s in res.sources] == [LIRA.id, other.id]
+    assert [s.number for s in res.sources] == [1, 2]
+    assert res.generation_latency_ms > 0
+    # Turns stored before the RAG fields existed still load.
+    old = res.model_dump(mode="json")
+    for key in ("retrievals", "sources", "paper_labels", "generation_latency_ms"):
+        old.pop(key)
+    assert TurnResult.model_validate(old).retrievals == []

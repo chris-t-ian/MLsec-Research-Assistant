@@ -150,6 +150,9 @@ class RetrievalTrace(_Frozen):
     strategy: str
     question: str
     semantic_query: str = Field(description="Query after self-query cleaning (or the question).")
+    query_translation: QueryTranslation | None = None
+    retriever: RetrieverKind | None = None
+    rerank: bool = False
     rewrites: list[str] = Field(
         default_factory=list, description="Paraphrases, HyDE passages or sub-questions."
     )

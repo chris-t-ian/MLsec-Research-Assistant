@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 import chainlit as cl
@@ -22,17 +23,23 @@ from chainlit.types import ThreadDict
 from chainlit.utils import utc_now
 from pydantic import ValidationError
 from render import (
+    RAG_STEP_NAME,
     ChainlitSink,
     IngestTaskSink,
     answer_markdown,
     format_tool_result,
+    help_element,
     md,
+    rag_elements,
+    rag_markdown,
+    rag_summary,
     run_summary,
     source_element,
 )
 
 from research_assistant.agent import SessionState, TurnResult
 from research_assistant.agent.graph import confirm_pending_ingest, default_agent, run_turn
+from research_assistant.app_guide import default_app_guide, quick_reference
 from research_assistant.auth import check_demo_credentials
 from research_assistant.config import ConfigError, Settings, get_settings
 from research_assistant.export import (
@@ -46,6 +53,7 @@ from research_assistant.export import (
 )
 from research_assistant.models import IngestRequest
 from research_assistant.persistence import init_db, sqlalchemy_url
+from research_assistant.rag_trace import build_rag_trace
 from research_assistant.retrieval.strategies import (
     StrategyConfigError,
     get_strategy,
@@ -55,6 +63,10 @@ from research_assistant.retrieval.strategies import (
 logger = logging.getLogger("app")
 
 SESSION_KEY = "research_session"
+RESEARCH_PROFILE = "Research Assistant"
+GUIDE_PROFILE = "App Guide"
+HELP_PATH = Path(__file__).resolve().parent / "help.md"
+HELP_COMMAND = "help"
 INGEST_TIMEOUT_S = 300
 MAX_TOP_K = 20
 
@@ -113,32 +125,84 @@ async def password_auth(username: str, password: str) -> cl.User | None:
 # --------------------------------------------------------------------------- start
 
 
-@cl.set_starters
-async def set_starters(user: Any = None, language: Any = None) -> list[cl.Starter]:
+RESEARCH_STARTERS = [
+    cl.Starter(
+        label="Literature: LiRA vs. shadow models",
+        message=(
+            "How does LiRA improve on the shadow-model membership inference attack of "
+            "Shokri et al., and why does it report TPR at low FPR?"
+        ),
+    ),
+    cl.Starter(
+        label="DP-SGD epsilon",
+        message=(
+            "What epsilon does DP-SGD reach with noise multiplier 1.1, sampling rate 0.01, "
+            "10,000 steps and delta 1e-5? Compare RDP and PLD accounting."
+        ),
+    ),
+    cl.Starter(
+        label="Citation graph",
+        message="Which papers cite Shokri et al.'s membership inference paper (1610.05820)?",
+    ),
+    cl.Starter(
+        label="BibTeX export",
+        message="Give me BibTeX for 1610.05820 and 2112.03570.",
+    ),
+]
+
+GUIDE_STARTERS = [
+    cl.Starter(label="What is HyDE?", message="What is HyDE and when should I use it?"),
+    cl.Starter(
+        label="Which strategy should I pick?",
+        message="Which retrieval strategy should I use, and what do they cost?",
+    ),
+    cl.Starter(
+        label="How are citations checked?", message="How do citations and verification work?"
+    ),
+    cl.Starter(label="Export", message="How do I export a conversation, and in which formats?"),
+]
+
+
+@cl.set_chat_profiles
+async def chat_profiles(user: Any = None, language: Any = None) -> list[cl.ChatProfile]:
     return [
-        cl.Starter(
-            label="Literature: LiRA vs. shadow models",
-            message=(
-                "How does LiRA improve on the shadow-model membership inference attack of "
-                "Shokri et al., and why does it report TPR at low FPR?"
+        cl.ChatProfile(
+            name=RESEARCH_PROFILE,
+            markdown_description=(
+                "Cited answers from ML privacy & security papers, with tools. "
+                "Type **/help** for a quick reference."
             ),
+            icon="/public/favicon.svg",
+            default=True,
+            starters=RESEARCH_STARTERS,
         ),
-        cl.Starter(
-            label="DP-SGD epsilon",
-            message=(
-                "What epsilon does DP-SGD reach with noise multiplier 1.1, sampling rate 0.01, "
-                "10,000 steps and delta 1e-5? Compare RDP and PLD accounting."
+        cl.ChatProfile(
+            name=GUIDE_PROFILE,
+            markdown_description=(
+                "Questions about using the app: strategies, citations, export, tools, security."
             ),
-        ),
-        cl.Starter(
-            label="Citation graph",
-            message="Which papers cite Shokri et al.'s membership inference paper (1610.05820)?",
-        ),
-        cl.Starter(
-            label="BibTeX export",
-            message="Give me BibTeX for 1610.05820 and 2112.03570.",
+            icon="/public/guide.svg",
+            starters=GUIDE_STARTERS,
         ),
     ]
+
+
+def _is_guide() -> bool:
+    return cl.user_session.get("chat_profile") == GUIDE_PROFILE
+
+
+async def _set_research_commands() -> None:
+    await cl.context.emitter.set_commands(
+        [
+            {
+                "id": HELP_COMMAND,
+                "description": "Quick reference: settings, strategies, tools, export",
+                "icon": "circle-help",
+                "button": False,
+                "persistent": False,
+            }
+        ]
+    )
 
 
 def _chat_settings(settings: Settings, session: SessionState) -> cl.ChatSettings:
@@ -178,9 +242,12 @@ def _chat_settings(settings: Settings, session: SessionState) -> cl.ChatSettings
 async def on_chat_start() -> None:
     try:
         settings = get_settings()
+        if _is_guide():
+            return  # the App Guide has no settings; its index is built on the first question
         session = _new_session(settings)
         cl.user_session.set(SESSION_KEY, session)
         await _chat_settings(settings, session).send()
+        await _set_research_commands()
         await cl.make_async(default_agent)()  # build the agent now, not on the first question
     except (ConfigError, StrategyConfigError, ValidationError):
         error_id = _error_id()
@@ -197,12 +264,15 @@ async def on_chat_resume(thread: ThreadDict) -> None:
     """A thread was reopened from the history sidebar: rebuild the session state."""
     try:
         settings = get_settings()
+        if _is_guide():
+            return
         session = _new_session(settings)
         saved = cl.user_session.get("chat_settings")  # restored by Chainlit from the thread
         if isinstance(saved, dict):
             _apply_settings(session, saved, settings)
         cl.user_session.set(SESSION_KEY, session)
         await _chat_settings(settings, session).send()
+        await _set_research_commands()
         await cl.make_async(default_agent)()
     except Exception:
         error_id = _error_id()
@@ -254,6 +324,29 @@ async def _render_turn(
         await message.send()
 
 
+async def _send_rag_view(result: TurnResult, answer: cl.Message) -> None:
+    """Collapsible "How this answer was built" step under the answer (never breaks a turn)."""
+    try:
+        trace = await cl.make_async(build_rag_trace)(result)
+        step = cl.Step(
+            name=RAG_STEP_NAME,
+            type="retrieval",
+            parent_id=answer.id,
+            show_input=False,
+            default_open=False,
+        )
+        step.start = utc_now()
+        step.output = f"_{rag_summary(trace)}_\n\n{rag_markdown(trace)}"
+        step.end = utc_now()
+        await step.send()
+        # One at a time: Step.send() sends its elements concurrently, which scrambles the
+        # chart order in the UI (candidates per search, then latency).
+        for element in rag_elements(trace):
+            await element.send(for_id=step.id)
+    except Exception:
+        logger.exception("Rendering the RAG view failed")
+
+
 async def _handle_ingest(session: SessionState, req: IngestRequest) -> None:
     """Ask the user to confirm one pending ingest request, then run it with progress."""
     arxiv_id = req.arxiv_id  # from the core's request, never from the client's payload
@@ -283,10 +376,42 @@ async def _handle_ingest(session: SessionState, req: IngestRequest) -> None:
     await cl.Message(content=format_tool_result("confirm_ingest", result)).send()
 
 
+def _is_help_request(message: cl.Message) -> bool:
+    text = (message.content or "").strip().lower()
+    return message.command == HELP_COMMAND or text in ("/help", "help", "/?")
+
+
+async def _guide_message(message: cl.Message) -> None:
+    """App Guide profile: answer from app/help.md, citing its sections in the side panel."""
+    root = cl.Step(name="App Guide", type="run", show_input=False)
+    root.start = utc_now()
+    await root.send()
+    answer = cl.Message(content="", created_at=utc_now())
+    sink = ChainlitSink(root, answer)
+    try:
+        guide = await cl.make_async(default_app_guide)(HELP_PATH)
+        result = await cl.make_async(guide.answer)(message.content, sink)
+    finally:
+        root.end = utc_now()
+        await root.update()
+    answer.content = result.text
+    answer.elements = [help_element(s) for s in result.cited]
+    if sink.streamed:
+        await answer.update()
+    else:
+        await answer.send()
+
+
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     error_id = _error_id()
     try:
+        if _is_guide():
+            await _guide_message(message)
+            return
+        if _is_help_request(message):
+            await cl.Message(content=await cl.make_async(quick_reference)()).send()
+            return
         session = _session()
         root = cl.Step(name="Research", type="run", show_input=False)
         root.start = utc_now()
@@ -303,6 +428,8 @@ async def on_message(message: cl.Message) -> None:
         root.output = run_summary(result)
         await root.update()
         await _render_turn(result, answer, sink, session)
+        if not result.blocked:
+            await _send_rag_view(result, answer)
         for req in result.pending_ingests:
             await _handle_ingest(session, req)
     except Exception:

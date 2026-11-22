@@ -11,6 +11,7 @@ from research_assistant.models import (
     Citation,
     CitationError,
     IngestRequest,
+    RetrievalTrace,
     SecurityEvent,
     TokenUsage,
     ToolCitation,
@@ -75,6 +76,19 @@ class ToolCallOutcome(BaseModel):
     result: ToolResult
 
 
+class SourceRef(BaseModel):
+    """A chunk passed to the answer generator as source ``[number]`` (cited or not)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    number: int = Field(ge=1)
+    chunk_id: str = Field(min_length=1)
+    arxiv_id: str = Field(min_length=1)
+    label: str
+    title: str = ""
+    section: str | None = None
+
+
 class TurnResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -94,6 +108,17 @@ class TurnResult(BaseModel):
     model: str | None = None
     token_usage: TokenUsage = TokenUsage()
     latency_ms: float = Field(default=0.0, ge=0)
+    # RAG trace data (defaults keep turns stored before these fields existed loadable).
+    retrievals: list[RetrievalTrace] = Field(
+        default_factory=list, description="One trace per knowledge-base search, in order."
+    )
+    sources: list[SourceRef] = Field(
+        default_factory=list, description="Every chunk given to the answer generator."
+    )
+    paper_labels: dict[str, str] = Field(
+        default_factory=dict, description="arXiv ID -> author-year label for traced papers."
+    )
+    generation_latency_ms: float = Field(default=0.0, ge=0)
 
 
-__all__ = ["SessionState", "ToolCallOutcome", "TraceStep", "TurnResult"]
+__all__ = ["SessionState", "SourceRef", "ToolCallOutcome", "TraceStep", "TurnResult"]

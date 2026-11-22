@@ -53,12 +53,19 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import Field, ValidationError
 
-from research_assistant.agent.state import SessionState, ToolCallOutcome, TraceStep, TurnResult
+from research_assistant.agent.state import (
+    SessionState,
+    SourceRef,
+    ToolCallOutcome,
+    TraceStep,
+    TurnResult,
+)
 from research_assistant.config import Settings, get_settings
 from research_assistant.events import EventSink, NullSink
 from research_assistant.generation.answer import (
     AnswerDeps,
     GenerationError,
+    author_year_label,
     generate_answer,
     make_excerpt,
     make_sources,
@@ -75,6 +82,7 @@ from research_assistant.llm import (
 from research_assistant.models import (
     Answer,
     IngestRequest,
+    RetrievalTrace,
     ScoredChunk,
     SecurityEvent,
     TokenUsage,
@@ -219,6 +227,9 @@ class TurnContext:
     answer: Answer | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)
     node_counts: dict[str, int] = field(default_factory=dict)
+    retrievals: list[RetrievalTrace] = field(default_factory=list)
+    sources: list[SourceRef] = field(default_factory=list)
+    paper_labels: dict[str, str] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- dependencies
@@ -697,6 +708,8 @@ class ResearchAgent:
                 ok=False, error="The knowledge-base search failed.", source="knowledge_base"
             ), chunks
         ctx.usage = ctx.usage + res.trace.token_usage
+        ctx.retrievals.append(res.trace)
+        ctx.paper_labels.update(self._paper_labels(res.trace, ctx.paper_labels))
         seen = {c.chunk.id for c in chunks}
         merged = chunks + [c for c in res.chunks if c.chunk.id not in seen]
         sources = make_sources(merged)
@@ -715,6 +728,22 @@ class ResearchAgent:
         ]
         data = {"query": parsed.question, "n_sources_total": len(merged), "sources": listed}
         return ToolResult(ok=True, data=data, source="knowledge_base"), merged
+
+    def _paper_labels(self, trace: RetrievalTrace, known: dict[str, str]) -> dict[str, str]:
+        """Author-year labels for the papers among a search's candidates (for the RAG view)."""
+        wanted = {c.arxiv_id for st in trace.stages for c in st.candidates} - known.keys()
+        if not wanted:
+            return {}
+        try:
+            rows = self.deps.retrieval.index.metadata()
+        except Exception:  # labels are cosmetic; never fail a turn over them
+            logger.warning("Index metadata unavailable for paper labels", exc_info=True)
+            return {}
+        labels: dict[str, str] = {}
+        for r in rows:
+            if r.arxiv_id in wanted and r.arxiv_id not in labels:
+                labels[r.arxiv_id] = author_year_label(r.authors, r.year, f"arXiv:{r.arxiv_id}")
+        return labels
 
     def _run_domain_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         schema, fn = _DOMAIN_TOOLS[name]
@@ -792,6 +821,18 @@ class ResearchAgent:
 
         ctx.answer = ans
         ctx.usage = ctx.usage + ans.generation_token_usage
+        if chunks:
+            ctx.sources = [
+                SourceRef(
+                    number=s.number,
+                    chunk_id=s.chunk.id,
+                    arxiv_id=s.chunk.arxiv_id,
+                    label=s.label,
+                    title=s.chunk.title,
+                    section=s.chunk.section,
+                )
+                for s in make_sources(chunks)
+            ]
         final = AIMessage(content=ans.text, name=FINAL_ANSWER_NAME)
         return (
             {"messages": [final]},
@@ -879,6 +920,10 @@ class ResearchAgent:
             model=ans.model,
             token_usage=ctx.usage,
             latency_ms=(time.perf_counter() - t0) * 1000,
+            retrievals=ctx.retrievals,
+            sources=ctx.sources,
+            paper_labels=ctx.paper_labels,
+            generation_latency_ms=ans.generation_latency_ms,
         )
 
     def confirm_pending_ingest(

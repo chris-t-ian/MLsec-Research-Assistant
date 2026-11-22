@@ -9,7 +9,15 @@ import render
 from chainlit.context import init_http_context
 
 from research_assistant.agent.state import TurnResult
+from research_assistant.app_guide import GuideAnswer, HelpSection
 from research_assistant.models import Citation, SecurityEvent, ToolResult
+from research_assistant.rag_trace import (
+    CandidateRow,
+    RagTrace,
+    SearchView,
+    SourceUse,
+    StageLatency,
+)
 
 
 @pytest.fixture
@@ -249,3 +257,178 @@ def test_warned_input_adds_note() -> None:
     )
     out = render.answer_markdown(res)
     assert out.startswith("> **Note:**") and out.endswith("LiRA ([1] Shokri et al. 2017).")
+
+
+# --------------------------------------------------------------------------- RAG view
+
+
+def row(chunk_id: str, status: str = "not_selected", **kw: Any) -> CandidateRow:
+    arxiv_id = chunk_id.split(":")[0]
+    base: dict[str, Any] = {
+        "chunk_id": chunk_id,
+        "arxiv_id": arxiv_id,
+        "paper_label": f"Paper {arxiv_id}",
+        "status": status,
+    }
+    return CandidateRow(**{**base, **kw})
+
+
+def search_view(rows: list[CandidateRow], **kw: Any) -> SearchView:
+    base: dict[str, Any] = {
+        "number": 1,
+        "question": "How does LiRA work?",
+        "strategy": "hybrid",
+        "semantic_query": "How does LiRA work?",
+        "candidates": rows,
+        "n_candidates_total": len(rows),
+        "latency_ms": 1234,
+        "stages": ["retrieve", "fuse", "select"],
+    }
+    return SearchView(**{**base, **kw})
+
+
+def rag(searches: list[SearchView], **kw: Any) -> RagTrace:
+    base: dict[str, Any] = {
+        "searches": searches,
+        "latencies": [
+            StageLatency(
+                stage="retrieve", label="Dense + BM25 search", group="retrieval", latency_ms=120
+            ),
+            StageLatency(
+                stage="generate",
+                label="Answer generation (LLM)",
+                group="generation",
+                latency_ms=2500,
+            ),
+        ],
+        "sources": [
+            SourceUse(
+                number=1,
+                label="Shokri et al. 2017",
+                title="MIA",
+                arxiv_id="1610.05820",
+                chunk_id="1610.05820:1:0",
+                cited=True,
+            ),
+            SourceUse(
+                number=2,
+                label="Carlini et al. 2021",
+                title="LiRA",
+                arxiv_id="2112.03570",
+                chunk_id="2112.03570:1:0",
+                cited=False,
+            ),
+        ],
+        "total_latency_ms": 4000,
+    }
+    return RagTrace(**{**base, **kw})
+
+
+def hybrid_rows() -> list[CandidateRow]:
+    return [
+        row(
+            "1610.05820:1:0",
+            "cited",
+            source_number=1,
+            dense_score=0.8,
+            bm25_rank=2,
+            rrf_score=0.03,
+            final_rank=1,
+        ),
+        row(
+            "2112.03570:1:0",
+            "unused",
+            source_number=2,
+            dense_score=0.7,
+            rrf_score=0.02,
+            final_rank=2,
+        ),
+        row("1912.00001:0:3", bm25_rank=1, rrf_score=0.016),
+    ]
+
+
+def test_candidates_figure_has_one_panel_per_stage_that_ran() -> None:
+    fig = render.candidates_figure(search_view(hybrid_rows()))
+    assert fig is not None
+    titles = [a.text for a in fig.layout.annotations]
+    assert titles == ["Dense score (cosine)", "BM25 rank", "RRF score"]  # no rerank stage
+    assert fig.layout.xaxis2.autorange == "reversed"  # BM25 rank: better to the right
+    labels = list(fig.layout.yaxis.categoryarray)
+    assert labels == ["[1] Paper 1610.05820", "[2] Paper 2112.03570", "Paper 1912.00001 · s0·c3"]
+
+
+def test_candidates_figure_colors_by_paper_and_marks_status() -> None:
+    fig = render.candidates_figure(search_view(hybrid_rows()))
+    assert fig is not None
+    data = [t for t in fig.data if t.x and t.x[0] is not None]
+    by_name = {t.name: t for t in data if t.xaxis == "x"}  # dense panel
+    assert by_name["Paper 1610.05820"].marker.color == render.PAPER_COLORS[0]
+    assert by_name["Paper 2112.03570"].marker.color == render.PAPER_COLORS[1]
+    assert list(by_name["Paper 1610.05820"].marker.symbol) == ["circle"]
+    assert list(by_name["Paper 2112.03570"].marker.symbol) == ["circle-open"]
+    legend = [t.name for t in fig.data if t.showlegend is not False]
+    assert "cited in the answer" in legend and "Paper 1912.00001" in legend
+
+
+def test_candidates_figure_folds_extra_papers_into_other() -> None:
+    rows = [row(f"2001.{i:05d}:0:0", dense_score=1 - i / 10) for i in range(9)]
+    fig = render.candidates_figure(search_view(rows))
+    assert fig is not None
+    names = {t.name for t in fig.data}
+    assert render.OTHER_PAPERS in names
+    assert len(names - {render.OTHER_PAPERS} - {s[3] for s in render.STATUS_STYLE.values()}) == 7
+
+
+def test_candidates_figure_escapes_untrusted_labels() -> None:
+    bad = row("1610.05820:1:0", dense_score=0.5, paper_label='<a href="http://evil">x</a>')
+    fig = render.candidates_figure(search_view([bad]))
+    assert fig is not None
+    dumped = fig.to_json()
+    assert "<a href" not in dumped and "&lt;a href" in dumped
+
+
+def test_candidates_figure_none_without_candidates() -> None:
+    assert render.candidates_figure(search_view([])) is None
+
+
+def test_latency_figure_bars_in_pipeline_order() -> None:
+    fig = render.latency_figure(rag([]))
+    assert fig is not None
+    assert list(fig.layout.yaxis.categoryarray) == [
+        "Dense + BM25 search",
+        "Answer generation (LLM)",
+    ]
+    assert {t.name for t in fig.data} == {"Retrieval", "Generation"}
+    assert render.latency_figure(rag([], latencies=[])) is None
+
+
+def test_rag_markdown_lists_rewrites_filters_and_sources() -> None:
+    s = search_view(
+        hybrid_rows(),
+        query_translation="hyde",
+        rewrites=["A *hypothetical* passage"],
+        stages=["self_query", "query_translation", "retrieve"],
+    )
+    text = render.rag_markdown(rag([s]))
+    assert "Hypothetical passage (HyDE)" in text and "A \\*hypothetical\\* passage" in text
+    assert "Extracted filters: none" in text
+    assert "1 cited, 1 unused" in text
+    assert "[1] Shokri et al. 2017" in text and "Retrieved but not cited" in text
+
+
+def test_rag_markdown_without_search_explains_missing_chart() -> None:
+    text = render.rag_markdown(rag([], sources=[]))
+    assert "No knowledge-base search" in text
+
+
+async def test_rag_elements_are_inline_plotly(chainlit_context: None) -> None:
+    elements = render.rag_elements(rag([search_view(hybrid_rows())]))
+    assert [e.name for e in elements] == ["Candidates per stage", "Latency per stage"]
+    assert all(e.display == "inline" for e in elements)
+
+
+async def test_help_element_is_named_like_the_reference(chainlit_context: None) -> None:
+    sec = HelpSection(title="Export", text="JSON, CSV, PDF")
+    ans = GuideAnswer(question="q", text="Use export (Help: Export).", cited=[sec])
+    el = render.help_element(ans.cited[0])
+    assert el.name == "Help: Export" and el.name in ans.text
