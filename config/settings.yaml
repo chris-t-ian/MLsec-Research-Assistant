@@ -22,6 +22,7 @@ paths:
   strategies_file: config/strategies.yaml
   cache_dir: data/cache
   audit_log: data/logs/tool_audit.jsonl
+  chat_db: data/chainlit.db  # Chainlit chat history (create with scripts/init_db.py)
 
 limits:
   max_question_chars: 2000

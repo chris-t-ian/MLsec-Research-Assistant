@@ -1,7 +1,11 @@
 """Chainlit entry point: ``uv run chainlit run app/main.py -w``.
 
-Thin layer: it calls the core (``run_turn``, ``confirm_pending_ingest``) in a worker thread
-and renders the results with :mod:`render`. No retrieval, agent or security logic lives here.
+Thin layer: it calls the core (``run_turn``, ``confirm_pending_ingest``, exports) and renders
+the results with :mod:`render`. No retrieval, agent, security or export logic lives here.
+
+Chat history is stored in SQLite (schema: ``research_assistant.persistence``); it needs a
+login, so a password callback checks the demo user from .env. Each answer message stores its
+``TurnResult`` as JSON in its metadata, from which the export actions rebuild the conversation.
 """
 
 from __future__ import annotations
@@ -11,7 +15,10 @@ import uuid
 from typing import Any
 
 import chainlit as cl
+from chainlit.data import get_data_layer
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.input_widget import Select, Slider
+from chainlit.types import ThreadDict
 from chainlit.utils import utc_now
 from pydantic import ValidationError
 from render import (
@@ -26,8 +33,19 @@ from render import (
 
 from research_assistant.agent import SessionState, TurnResult
 from research_assistant.agent.graph import confirm_pending_ingest, default_agent, run_turn
+from research_assistant.auth import check_demo_credentials
 from research_assistant.config import ConfigError, Settings, get_settings
+from research_assistant.export import (
+    Conversation,
+    conversation_from_thread,
+    export_citations_csv,
+    export_json,
+    export_messages_csv,
+    export_pdf,
+    turn_metadata,
+)
 from research_assistant.models import IngestRequest
+from research_assistant.persistence import init_db, sqlalchemy_url
 from research_assistant.retrieval.strategies import (
     StrategyConfigError,
     get_strategy,
@@ -54,12 +72,42 @@ def _error_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _new_session(settings: Settings) -> SessionState:
+    # The agent's memory is keyed by session_id: using the thread id lets a resumed thread
+    # continue its history (as long as the server process is the same; memory is in RAM).
+    return SessionState(
+        session_id=cl.context.session.thread_id, strategy=settings.agent.default_strategy
+    )
+
+
 def _session() -> SessionState:
     session = cl.user_session.get(SESSION_KEY)
     if not isinstance(session, SessionState):
-        session = SessionState(strategy=get_settings().agent.default_strategy)
+        session = _new_session(get_settings())
         cl.user_session.set(SESSION_KEY, session)
     return session
+
+
+# --------------------------------------------------------------------------- persistence
+
+
+@cl.data_layer
+def chat_data_layer() -> SQLAlchemyDataLayer:
+    path = init_db(get_settings().paths.resolve().chat_db)  # idempotent
+    return SQLAlchemyDataLayer(conninfo=sqlalchemy_url(path))
+
+
+@cl.password_auth_callback
+async def password_auth(username: str, password: str) -> cl.User | None:
+    try:
+        settings = get_settings()
+    except ConfigError:
+        logger.exception("Login failed: configuration error")
+        return None
+    if check_demo_credentials(username, password, settings):
+        return cl.User(identifier=username, metadata={"role": "demo", "provider": "credentials"})
+    logger.info("Rejected login attempt")
+    return None
 
 
 # --------------------------------------------------------------------------- start
@@ -130,7 +178,7 @@ def _chat_settings(settings: Settings, session: SessionState) -> cl.ChatSettings
 async def on_chat_start() -> None:
     try:
         settings = get_settings()
-        session = SessionState(strategy=settings.agent.default_strategy)
+        session = _new_session(settings)
         cl.user_session.set(SESSION_KEY, session)
         await _chat_settings(settings, session).send()
         await cl.make_async(default_agent)()  # build the agent now, not on the first question
@@ -144,19 +192,42 @@ async def on_chat_start() -> None:
         await cl.Message(content=GENERIC_ERROR.format(error_id=error_id)).send()
 
 
+@cl.on_chat_resume
+async def on_chat_resume(thread: ThreadDict) -> None:
+    """A thread was reopened from the history sidebar: rebuild the session state."""
+    try:
+        settings = get_settings()
+        session = _new_session(settings)
+        saved = cl.user_session.get("chat_settings")  # restored by Chainlit from the thread
+        if isinstance(saved, dict):
+            _apply_settings(session, saved, settings)
+        cl.user_session.set(SESSION_KEY, session)
+        await _chat_settings(settings, session).send()
+        await cl.make_async(default_agent)()
+    except Exception:
+        error_id = _error_id()
+        logger.exception("Chat resume failed [error id %s]", error_id)
+        await cl.Message(content=GENERIC_ERROR.format(error_id=error_id)).send()
+
+
+def _apply_settings(session: SessionState, values: dict[str, Any], settings: Settings) -> None:
+    """Copy valid chat-setting values into the session (raises on invalid values)."""
+    strategy = values.get("strategy")
+    if isinstance(strategy, str) and strategy in strategy_names(settings):
+        session.strategy = strategy
+    if values.get("top_k") is not None:
+        session.top_k = int(values["top_k"])
+    model = values.get("model")
+    if isinstance(model, str) and model in settings.models.choices():
+        session.model = model
+
+
 @cl.on_settings_update
 async def on_settings_update(values: dict[str, Any]) -> None:
     session = _session()
     settings = get_settings()
     try:
-        strategy = values.get("strategy")
-        if isinstance(strategy, str) and strategy in strategy_names(settings):
-            session.strategy = strategy
-        if values.get("top_k") is not None:
-            session.top_k = int(values["top_k"])
-        model = values.get("model")
-        if isinstance(model, str) and model in settings.models.choices():
-            session.model = model
+        _apply_settings(session, values, settings)
     except (ValidationError, TypeError, ValueError):
         logger.warning("Rejected chat settings %r", values)
         await cl.Message(content="That setting is not valid; the previous value is kept.").send()
@@ -165,13 +236,18 @@ async def on_settings_update(values: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------- messages
 
 
-async def _render_turn(result: TurnResult, message: cl.Message, sink: ChainlitSink) -> None:
+async def _render_turn(
+    result: TurnResult, message: cl.Message, sink: ChainlitSink, session: SessionState
+) -> None:
     message.content = answer_markdown(result)
     elements: list[Any] = []
     if not result.blocked:
         elements += [source_element(c) for c in result.citations]
         elements += sink.files
     message.elements = elements
+    strategy = session.strategy or get_settings().agent.default_strategy
+    message.metadata = turn_metadata(result, strategy, session.top_k)
+    message.actions = export_actions()
     if sink.streamed:  # the message already exists in the UI: replace the raw streamed text
         await message.update()
     else:
@@ -215,7 +291,9 @@ async def on_message(message: cl.Message) -> None:
         root = cl.Step(name="Research", type="run", show_input=False)
         root.start = utc_now()
         await root.send()
-        answer = cl.Message(content="")
+        # Streamed messages get no timestamp from Chainlit; without one the stored answer
+        # sorts before its question in the history and exports.
+        answer = cl.Message(content="", created_at=utc_now())
         sink = ChainlitSink(root, answer)
         try:
             result = await cl.make_async(run_turn)(message.content, session, sink)
@@ -224,9 +302,92 @@ async def on_message(message: cl.Message) -> None:
             await root.update()
         root.output = run_summary(result)
         await root.update()
-        await _render_turn(result, answer, sink)
+        await _render_turn(result, answer, sink, session)
         for req in result.pending_ingests:
             await _handle_ingest(session, req)
     except Exception:
         logger.exception("Unhandled error in on_message [error id %s]", error_id)
         await cl.Message(content=GENERIC_ERROR.format(error_id=error_id)).send()
+
+
+# --------------------------------------------------------------------------- export
+
+EXPORT_FORMATS = ("json", "csv", "pdf")
+EXPORT_ERROR = "Sorry, the export failed. Please try again (error id `{error_id}`)."
+
+
+def export_actions() -> list[cl.Action]:
+    return [
+        cl.Action(
+            name=f"export_{fmt}",
+            payload={},
+            label=f"Export {fmt.upper()}",
+            icon="download",
+            tooltip=f"Download the whole conversation as {fmt.upper()}",
+        )
+        for fmt in EXPORT_FORMATS
+    ]
+
+
+async def _load_conversation() -> Conversation | None:
+    """The current thread as stored by the data layer (only the logged-in user's own)."""
+    data_layer = get_data_layer()
+    user = cl.context.session.user
+    if data_layer is None or user is None:
+        return None
+    thread = await data_layer.get_thread(cl.context.session.thread_id)
+    if not thread or thread.get("userIdentifier") != user.identifier:
+        return None
+    return conversation_from_thread(thread)
+
+
+def _export_files(fmt: str, conv: Conversation) -> list[cl.File]:
+    stem = f"conversation-{(conv.created_at or conv.exported_at):%Y%m%d-%H%M}"
+    if fmt == "json":
+        return [cl.File(name=f"{stem}.json", content=export_json(conv), mime="application/json")]
+    if fmt == "csv":
+        return [
+            cl.File(
+                name=f"{stem}-messages.csv", content=export_messages_csv(conv), mime="text/csv"
+            ),
+            cl.File(
+                name=f"{stem}-citations.csv", content=export_citations_csv(conv), mime="text/csv"
+            ),
+        ]
+    return [cl.File(name=f"{stem}.pdf", content=export_pdf(conv), mime="application/pdf")]
+
+
+async def _export(action: cl.Action, fmt: str) -> None:
+    error_id = _error_id()
+    try:
+        conv = await _load_conversation()
+        if conv is None or not conv.messages:
+            await cl.Message(
+                content="Nothing to export yet: this conversation is not saved (logged in?)."
+            ).send()
+            return
+        files = await cl.make_async(_export_files)(fmt, conv)
+        target = action.forId
+        if target is None:
+            await cl.Message(content=f"{fmt.upper()} export:", elements=list(files)).send()
+            return
+        for f in files:  # attach the download(s) to the answer whose button was clicked
+            await f.send(for_id=target, persist=False)
+    except Exception:
+        logger.exception("Export %s failed [error id %s]", fmt, error_id)
+        await cl.Message(content=EXPORT_ERROR.format(error_id=error_id)).send()
+
+
+@cl.action_callback("export_json")
+async def on_export_json(action: cl.Action) -> None:
+    await _export(action, "json")
+
+
+@cl.action_callback("export_csv")
+async def on_export_csv(action: cl.Action) -> None:
+    await _export(action, "csv")
+
+
+@cl.action_callback("export_pdf")
+async def on_export_pdf(action: cl.Action) -> None:
+    await _export(action, "pdf")

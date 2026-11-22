@@ -49,6 +49,8 @@ class PathsConfig(BaseModel):
     cache_dir: Path = Path("data/cache")
     # JSONL audit log of every agent tool call (see research_assistant.security.tool_policy).
     audit_log: Path = Path("data/logs/tool_audit.jsonl")
+    # SQLite database of the Chainlit chat history (schema: research_assistant.persistence).
+    chat_db: Path = Path("data/chainlit.db")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -64,6 +66,7 @@ class PathsConfig(BaseModel):
             strategies_file=_abs(self.strategies_file),
             cache_dir=_abs(self.cache_dir),
             audit_log=_abs(self.audit_log),
+            chat_db=_abs(self.chat_db),
         )
 
 
@@ -194,6 +197,9 @@ class Settings(BaseSettings):
     # Secrets (from environment / .env only).
     openrouter_api_key: SecretStr | None = None
     semantic_scholar_api_key: SecretStr | None = None
+    # Single demo login of the web UI (chat history needs authentication).
+    demo_username: str | None = None
+    demo_password: SecretStr | None = None
 
     # Non-secret config (from settings.yaml).
     models: ModelsConfig
