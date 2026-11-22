@@ -1,0 +1,40 @@
+# DRAFT schema examples for eval/gold_questions.yaml (validated by
+# research_assistant.abtest.gold.GoldQuestion). Placeholders only: these are NOT gold data.
+#
+# Fields:
+#   id              unique; int or string
+#   question        the user question, as asked
+#   type            factual | comparison | method | out_of_scope
+#   gold_arxiv_ids  quoted arXiv IDs from data/papers.yaml that answer the question
+#                   (required for in-scope types, may be empty for out_of_scope)
+#   key_facts       short statements a good answer contains (for out_of_scope: the expected
+#                   behaviour, e.g. "The answer should say the corpus does not cover X.")
+#   notes           free text (provenance, how well facts were verified, caveats)
+#   topic           stratum for the split; filled by scripts/split_gold.py if absent
+#   split           dev | test; assigned once by scripts/split_gold.py, never by hand
+
+- id: DRAFT-1
+  question: 'DRAFT: <factual question about one paper>'
+  type: factual
+  gold_arxiv_ids:
+  - '<arXiv ID from data/papers.yaml>'
+  key_facts:
+  - 'DRAFT: <one short statement the answer must contain>'
+  notes: 'DRAFT example; facts: <checked | partial | memory>'
+- id: DRAFT-2
+  question: 'DRAFT: <how does method A compare to method B?>'
+  type: comparison
+  gold_arxiv_ids:
+  - '<arXiv ID of paper A>'
+  - '<arXiv ID of paper B>'
+  key_facts:
+  - 'DRAFT: <statement about A>'
+  - 'DRAFT: <statement about B>'
+  notes: DRAFT example
+- id: DRAFT-3
+  question: 'DRAFT: <question the corpus cannot answer>'
+  type: out_of_scope
+  gold_arxiv_ids: []
+  key_facts:
+  - 'DRAFT: The answer should say the corpus does not cover <topic>.'
+  notes: 'DRAFT example; subtype: <oos | false_premise | unanswerable | fabricated>'

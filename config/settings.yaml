@@ -3,7 +3,7 @@
 
 models:
   main: anthropic/claude-sonnet-5.5
-  judge: google/gemini-3.5-flash
+  judge: google/gemini-3.8-flash
   fallback: openai/gpt-4.1-mini
   # Additional models offered in the UI model setting (main and fallback are always offered).
   selectable: []
