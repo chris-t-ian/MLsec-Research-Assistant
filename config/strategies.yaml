@@ -8,7 +8,9 @@ defaults:
   fetch_k: 30
   top_k: 8
   rerank_k: 15
-  max_chunks_per_paper: 3
+  # 2 (was 3): leaves room for more different papers; more gold papers found in every
+  # strategy on dev (eval/results/tuning-20261123-102932) at no extra context tokens.
+  max_chunks_per_paper: 2
 
 strategies:
   - name: baseline_dense
@@ -40,3 +42,15 @@ strategies:
     use_filters: true
     retriever: hybrid
     rerank: true
+
+  # `full` tuned retrieval-only on the dev split (eval/tune_retrieval.py, run
+  # tuning-20261123-102932): more chunks and more reranked candidates. Confirmed against
+  # `full` on test (confirm-20261123-132343: +0.10 [0.06, 0.15] gold papers found), not
+  # against baseline_dense (+0.07 [-0.04, 0.17]).
+  - name: full_tuned
+    query_translation: multi_query
+    use_filters: true
+    retriever: hybrid
+    rerank: true
+    top_k: 12
+    rerank_k: 30

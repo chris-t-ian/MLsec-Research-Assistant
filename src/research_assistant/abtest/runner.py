@@ -23,6 +23,7 @@ from research_assistant.abtest.records import (
     RetrievedChunk,
     SearchRecord,
 )
+from research_assistant.abtest.retrieval_tuning import TuningManifest
 from research_assistant.agent.graph import (
     UNEXPECTED_ERROR_MESSAGE,
     AgentConfigError,
@@ -99,11 +100,15 @@ def git_info(root: Path = PROJECT_ROOT) -> tuple[str, bool]:
     return commit or "unknown", bool(status.strip())
 
 
-def append_test_log(log_file: Path, manifest: RunManifest, run_dir: Path, action: str) -> None:
-    """One JSON line per test-split run (``action`` = start | resume)."""
+def append_test_log(
+    log_file: Path, manifest: RunManifest | TuningManifest, run_dir: Path, action: str
+) -> None:
+    """One JSON line per test-split run (``action`` = start | resume). ``kind`` tells a
+    generation eval (run_eval.py) from a retrieval-only confirmation (tune_retrieval.py)."""
     entry = {
         "timestamp": utc_now(),
         "action": action,
+        "kind": "retrieval" if isinstance(manifest, TuningManifest) else "generation",
         "run_id": manifest.run_id,
         "run_dir": str(run_dir),
         "git_commit": manifest.git_commit,

@@ -367,7 +367,17 @@ def test_load_project_strategies() -> None:
         "hybrid_multiquery",
         "hybrid_hyde_rerank",
         "full",
+        "full_tuned",
     ]
+    tuned = strategies["full_tuned"]
+    assert (tuned.top_k, tuned.rerank_k) == (12, 30)
+    assert tuned.model_dump(
+        include={"query_translation", "use_filters", "retriever", "rerank"}
+    ) == (
+        strategies["full"].model_dump(
+            include={"query_translation", "use_filters", "retriever", "rerank"}
+        )
+    )
     base, full = strategies["baseline_dense"], strategies["full"]
     assert (base.retriever, base.query_translation, base.rerank, base.use_filters) == (
         "dense",
@@ -382,8 +392,10 @@ def test_load_project_strategies() -> None:
         True,
     )
     assert strategies["hybrid_hyde_rerank"].query_translation == "hyde"
-    assert all(s.max_chunks_per_paper == 3 for s in strategies.values())
-    assert all(s.rerank_k == 15 for s in strategies.values())
+    # `defaults` apply to every strategy that does not override them (full_tuned does, above)
+    assert all(s.max_chunks_per_paper == 2 for s in strategies.values())
+    untuned = [s for name, s in strategies.items() if name != "full_tuned"]
+    assert all(s.rerank_k == 15 for s in untuned)
 
 
 @pytest.mark.parametrize(

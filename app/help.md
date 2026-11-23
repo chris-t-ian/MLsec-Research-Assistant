@@ -32,7 +32,7 @@ Each strategy is a combination of pipeline stages defined in config/strategies.y
 self-query filters, query translation (multi-query, HyDE or decomposition), retrieval (dense,
 BM25 or hybrid), Reciprocal Rank Fusion (RRF), cross-encoder reranking and final selection.
 By default every strategy fetches 30 candidates per ranked list and returns 8 chunks, with at most
-3 chunks per paper.
+2 chunks per paper (so more different papers make it in).
 - **baseline_dense**: dense (embedding) search only. Fast; good for paraphrased or conceptual
   questions, weaker on exact terms, acronyms and paper names.
 - **hybrid** (default): dense search plus BM25 keyword search, fused with RRF. A good all-round
@@ -43,6 +43,9 @@ By default every strategy fetches 30 candidates per ranked list and returns 8 ch
 - **hybrid_hyde_rerank**: HyDE plus a cross-encoder reranker (see "HyDE").
 - **full**: self-query filters + multi-query + hybrid search + reranking. The most thorough and the
   slowest; use it for questions with constraints such as years, authors or sections.
+- **full_tuned**: **full** with settings tuned on the evaluation questions: 12 chunks per search
+  instead of 8 and 30 reranked candidates. Finds more of the relevant papers at the cost of a
+  longer prompt.
 
 ## HyDE (Hypothetical Document Embeddings)
 HyDE stands for Hypothetical Document Embeddings. Instead of embedding the short question, an LLM

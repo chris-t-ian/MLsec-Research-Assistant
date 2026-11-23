@@ -7,6 +7,8 @@ models:
   fallback: openai/gpt-4.1-mini
   # Additional models offered in the UI model setting (main and fallback are always offered).
   selectable: []
+  # Query rewriter for retrieval-only tuning (eval/tune_retrieval.py); judge if unset.
+  retrieval_tuning: anthropic/claude-haiku-4.5
 
 llm:
   base_url: https://openrouter.ai/api/v1

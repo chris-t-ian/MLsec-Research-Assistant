@@ -27,6 +27,8 @@ class ModelsConfig(BaseModel):
     fallback: str
     # Extra models a user may pick for answering (UI model setting), besides main and fallback.
     selectable: list[str] = Field(default_factory=list)
+    # Query rewriter for eval/tune_retrieval.py (query translation, self-query); judge if unset.
+    retrieval_tuning: str | None = None
 
     def choices(self) -> list[str]:
         """Models a session may answer with: main first, then fallback and ``selectable``."""
