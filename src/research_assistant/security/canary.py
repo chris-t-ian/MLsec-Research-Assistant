@@ -109,6 +109,9 @@ class CanaryGuardSink:
     def tool_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         self.inner.tool_result(name, args, result)
 
+    def answer_ready(self, answer: Any, verifying: bool) -> None:
+        self.inner.answer_ready(answer, verifying)
+
     def token(self, text: str) -> None:
         if self.tripped:
             return

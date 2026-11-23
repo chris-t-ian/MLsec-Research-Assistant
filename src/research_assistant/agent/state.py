@@ -10,12 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from research_assistant.models import (
     Citation,
     CitationError,
+    ClaimCheck,
     IngestRequest,
     RetrievalTrace,
     SecurityEvent,
     TokenUsage,
     ToolCitation,
     ToolResult,
+    VerificationInfo,
+    VerificationPolicy,
 )
 from research_assistant.security.canary import new_canary
 
@@ -43,6 +46,9 @@ class SessionState(BaseModel):
         default=None,
         min_length=1,
         description="Answering model (one of settings.models.choices()); None uses models.main.",
+    )
+    verification: VerificationPolicy | None = Field(
+        default=None, description="Claim verification policy; None uses verification.policy."
     )
     canary: str = Field(default_factory=new_canary, exclude=True, repr=False)
     pending_ingests: dict[str, IngestRequest] = Field(
@@ -119,6 +125,10 @@ class TurnResult(BaseModel):
         default_factory=dict, description="arXiv ID -> author-year label for traced papers."
     )
     generation_latency_ms: float = Field(default=0.0, ge=0)
+    # Claim verification (defaults keep older stored turns loadable).
+    claim_checks: list[ClaimCheck] = Field(default_factory=list)
+    supported_rate: float | None = None
+    verification: VerificationInfo | None = None
 
 
 __all__ = ["SessionState", "SourceRef", "ToolCallOutcome", "TraceStep", "TurnResult"]

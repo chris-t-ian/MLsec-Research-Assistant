@@ -2,9 +2,9 @@
 
 ::
 
-    START -> validate_input -> detect_injection -> agent <-> tools -> finalize -> END
-                   |                  |              |         |
-                   +------------------+--------------+---------+--> finalize (blocked)
+    START -> validate_input -> detect_injection -> agent <-> tools -> finalize -> verify -> END
+                   |                  |              |         |          |
+                   +------------------+--------------+---------+--> finalize (blocked) -> END
 
 validate_input    NFKC normalization, invisible-character stripping, length limits.
 detect_injection  heuristics (+ optional classifier): allow / warn / block.
@@ -15,6 +15,11 @@ tools             enforces the tool policy (allowlist, <= 6 calls per turn, inge
 finalize          writes the answer with the cited-answer generator from the collected
                   sources and tool results, so every answer goes through one citation pipeline;
                   checks the output for the session canary.
+verify            claim verification (research_assistant.verification): the judge model checks
+                  every cited sentence against its cited chunks, then the policy (flag /
+                  remove / regenerate, from ``verification.policy`` or the session) is
+                  applied. Skipped for blocked turns, generation errors and answers without
+                  sources or tool results.
 
 Conversation memory: a LangGraph checkpointer keyed by ``session_id`` (thread id). Each turn
 stores the user question and the final answer; the model sees the last
@@ -23,7 +28,8 @@ with a canary leak is removed from it.
 
 Events: one ``step_started``/``step_finished`` per node execution (step id
 ``agent:<turn>:<node>:<n>``) and one ``tool_result`` per tool call. Retrieval and generation
-emit their own nested steps.
+emit their own nested steps. ``finalize`` sends ``answer_ready`` once the generated answer
+passed the canary check, before claims are verified.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, TypedDict
@@ -61,7 +68,7 @@ from research_assistant.agent.state import (
     TurnResult,
 )
 from research_assistant.config import Settings, get_settings
-from research_assistant.events import EventSink, NullSink
+from research_assistant.events import EventSink, NoTokenSink, NullSink
 from research_assistant.generation.answer import (
     AnswerDeps,
     GenerationError,
@@ -72,9 +79,12 @@ from research_assistant.generation.answer import (
 )
 from research_assistant.generation.prompts import new_boundary, sanitize_source_text
 from research_assistant.llm import (
+    ChatStructuredLLM,
     LLMCallError,
     LLMConfigError,
+    StructuredLLM,
     ToolCallingLLM,
+    get_chat_model,
     get_streaming_llm,
     get_tool_calling_llm,
     usage_from_message,
@@ -88,6 +98,8 @@ from research_assistant.models import (
     TokenUsage,
     ToolEvidence,
     ToolResult,
+    VerificationInfo,
+    VerificationPolicy,
 )
 from research_assistant.retrieval.strategies import (
     RetrievalDeps,
@@ -127,6 +139,12 @@ from research_assistant.tools.base import ToolArgs, ToolDeps, format_validation_
 from research_assistant.tools.citations import CitationGraphArgs, citation_graph
 from research_assistant.tools.dp import DPAccountantArgs, dp_accountant
 from research_assistant.tools.registry import build_tools
+from research_assistant.verification.claims import summary_line
+from research_assistant.verification.verifier import (
+    JUDGE_FAILED,
+    VerificationError,
+    verify_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +226,7 @@ class AgentState(TypedDict, total=False):
     tool_calls: int  # allowed tool calls this turn
     agent_steps: int
     boundary: str
+    verify: bool  # finalize produced an answer that claim verification should check
 
 
 @dataclass
@@ -230,6 +249,12 @@ class TurnContext:
     retrievals: list[RetrievalTrace] = field(default_factory=list)
     sources: list[SourceRef] = field(default_factory=list)
     paper_labels: dict[str, str] = field(default_factory=dict)
+    verification: VerificationPolicy = "off"
+    # What finalize generated from (needed to verify and to regenerate the answer).
+    final_chunks: list[ScoredChunk] = field(default_factory=list)
+    final_evidence: list[ToolEvidence] = field(default_factory=list)
+    final_history: list[tuple[str, str]] = field(default_factory=list)
+    final_message_id: str | None = None
 
 
 # --------------------------------------------------------------------------- dependencies
@@ -252,6 +277,7 @@ class AgentDeps:
         tool_deps: ToolDeps | None = None,
         policy: ToolPolicy | None = None,
         detector: InjectionDetector | None = None,
+        judge: StructuredLLM | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         s = self.settings
@@ -267,6 +293,7 @@ class AgentDeps:
         self._llms: dict[str, ToolCallingLLM] = {}
         self._answer_deps: dict[str, AnswerDeps] = {}
         self._retrieval = retrieval
+        self._judge = judge
         self._lock = threading.Lock()
 
     def tool_schemas(self) -> list[Any]:
@@ -338,6 +365,22 @@ class AgentDeps:
     @property
     def answer_deps(self) -> AnswerDeps:
         return self.answer_deps_for(None)
+
+    def judge_llm(self) -> StructuredLLM:
+        """The claim-verification judge (``models.judge`` at temperature 0).
+
+        Raises VerificationError (user-safe) if no model can be configured.
+        """
+        with self._lock:
+            if self._judge is None:
+                s = self.settings
+                cfg = s.model_copy(update={"llm": s.llm.model_copy(update={"temperature": 0.0})})
+                try:
+                    chat = get_chat_model("judge", cfg)
+                except LLMConfigError as exc:
+                    raise VerificationError(JUDGE_FAILED) from exc
+                self._judge = ChatStructuredLLM(chat, max_attempts=s.llm.max_retries)
+            return self._judge
 
 
 _DOMAIN_TOOLS: dict[str, tuple[type[ToolArgs], Callable[..., ToolResult]]] = {
@@ -435,6 +478,7 @@ class ResearchAgent:
         g.add_node("agent", _node("agent", self._agent))
         g.add_node("tools", _node("tools", self._tools))
         g.add_node("finalize", _node("finalize", self._finalize))
+        g.add_node("verify", _node("verify", self._verify))
         g.add_edge(START, "validate_input")
         g.add_conditional_edges(
             "validate_input",
@@ -446,7 +490,8 @@ class ResearchAgent:
         )
         g.add_conditional_edges("agent", self._route_after_agent, ["tools", "finalize"])
         g.add_conditional_edges("tools", self._route_after_tools, ["agent", "finalize"])
-        g.add_edge("finalize", END)
+        g.add_conditional_edges("finalize", self._route_after_finalize, ["verify", END])
+        g.add_edge("verify", END)
         return g
 
     @staticmethod
@@ -463,6 +508,10 @@ class ResearchAgent:
         if isinstance(last, AIMessage) and last.tool_calls:
             return "tools"
         return "finalize"
+
+    @staticmethod
+    def _route_after_finalize(state: AgentState) -> str:
+        return "verify" if state.get("verify") else END
 
     def _route_after_tools(self, state: AgentState) -> Literal["agent", "finalize"]:
         a = self.settings.agent
@@ -791,20 +840,13 @@ class ResearchAgent:
 
         past, _ = split_turns(messages)
         n_hist = self.settings.agent.history_turns
+        history = past[-n_hist:] if n_hist else []
         guard = CanaryGuardSink(ctx.sink, session.canary)
+        generated = False
         try:
-            ans = generate_answer(
-                q,
-                chunks,
-                guard,
-                self.deps.answer_deps_for(ctx.model),
-                tool_results=evidence,
-                history=past[-n_hist:] if n_hist else [],
-                extra_system=canary_instruction(session.canary),
-                strategy=ctx.strategy,
-                max_tool_chars=self.settings.agent.max_tool_result_chars,
-            )
+            ans = self._generate(q, chunks, evidence, history, ctx, guard)
             guard.flush()
+            generated = True
         except GenerationError as exc:
             msg = str(exc)
             guard.token(msg)
@@ -833,9 +875,21 @@ class ResearchAgent:
                 )
                 for s in make_sources(chunks)
             ]
-        final = AIMessage(content=ans.text, name=FINAL_ANSWER_NAME)
+        ctx.final_chunks = chunks
+        ctx.final_evidence = evidence
+        ctx.final_history = history
+        ctx.final_message_id = uuid.uuid4().hex
+        final = AIMessage(content=ans.text, name=FINAL_ANSWER_NAME, id=ctx.final_message_id)
+        verify = (
+            generated
+            and ctx.verification != "off"
+            and bool(chunks or evidence)
+            and bool(ans.raw_text)
+        )
+        if generated:
+            ctx.sink.answer_ready(ans, verify)
         return (
-            {"messages": [final]},
+            {"messages": [final], "verify": verify},
             {
                 "n_sources": len(chunks),
                 "n_tool_results": len(evidence),
@@ -843,6 +897,103 @@ class ResearchAgent:
                 "tool_citations": [c.number for c in ans.tool_citations],
             },
         )
+
+    def _generate(
+        self,
+        q: str,
+        chunks: Sequence[ScoredChunk],
+        evidence: Sequence[ToolEvidence],
+        history: Sequence[tuple[str, str]],
+        ctx: TurnContext,
+        sink: EventSink,
+        revision: Sequence[str] = (),
+    ) -> Answer:
+        return generate_answer(
+            q,
+            chunks,
+            sink,
+            self.deps.answer_deps_for(ctx.model),
+            tool_results=evidence,
+            history=history,
+            extra_system=canary_instruction(ctx.session.canary),
+            strategy=ctx.strategy,
+            max_tool_chars=self.settings.agent.max_tool_result_chars,
+            revision=revision,
+            step_prefix=f"generation:{ctx.strategy}:revision" if revision else None,
+        )
+
+    def _verify(self, state: AgentState, ctx: TurnContext) -> tuple[dict[str, Any], dict[str, Any]]:
+        ans = ctx.answer
+        if ans is None:  # routing guarantees an answer; be defensive
+            return {}, {"skipped": True}
+        session = ctx.session
+        policy = ctx.verification
+        cfg = self.settings.verification
+        q = state.get("clean_question") or ""
+        sources = make_sources(ctx.final_chunks)
+
+        def regenerate(unsupported: Sequence[Any]) -> Answer:
+            # Not streamed: the UI replaces the streamed draft with the final text.
+            return self._generate(
+                q,
+                ctx.final_chunks,
+                ctx.final_evidence,
+                ctx.final_history,
+                ctx,
+                NoTokenSink(ctx.sink),
+                revision=[c.sentence for c in unsupported],
+            )
+
+        try:
+            judge = self.deps.judge_llm()
+        except VerificationError as exc:
+            ctx.answer = verify_answer_unavailable(ans, policy, str(exc))
+            return {}, {"policy": policy, "status": "error"}
+        new = verify_answer(
+            ans,
+            sources,
+            judge,
+            policy=policy,
+            config=cfg,
+            sink=ctx.sink,
+            judge_model=self.settings.models.judge,
+            tool_results=ctx.final_evidence,
+            excerpt_chars=self.settings.generation.excerpt_chars,
+            regenerate=regenerate,
+        )
+        info = new.verification
+        if info is not None:
+            ctx.usage = ctx.usage + info.token_usage
+
+        if new.text != ans.text and contains_canary(new.text, session.canary):
+            log_incident("revised answer", session.session_id)
+            ctx.events.append(
+                SecurityEvent(kind="canary_leak", detail="The generated answer was withheld.")
+            )
+            ctx.answer = Answer(question=q, text=CANARY_REFUSAL, raw_text=CANARY_REFUSAL)
+            return (
+                {"messages": self._remove_open_turn(state.get("messages", []))},
+                {"canary_leak": True},
+            )
+
+        ctx.answer = new
+        summary: dict[str, Any] = {
+            "policy": policy,
+            "status": info.status if info else "skipped",
+            "supported_rate": new.supported_rate,
+            "summary": summary_line(new.claim_checks) if new.claim_checks else None,
+        }
+        if info is not None and info.regenerated:
+            summary["regenerated"] = True
+        if info is not None and info.removed:
+            summary["removed"] = info.removed
+        update: dict[str, Any] = {}
+        if new.text != ans.text and ctx.final_message_id:
+            # Same id: replaces the final answer stored in conversation memory.
+            update["messages"] = [
+                AIMessage(content=new.text, name=FINAL_ANSWER_NAME, id=ctx.final_message_id)
+            ]
+        return update, summary
 
     @staticmethod
     def _remove_open_turn(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
@@ -865,6 +1016,7 @@ class ResearchAgent:
             turn_id=f"t{session.turns}",
             strategy=session.strategy or self.settings.agent.default_strategy,
             model=session.model,
+            verification=session.verification or self.settings.verification.policy,
         )
         initial: AgentState = {
             "question": question if isinstance(question, str) else "",
@@ -876,6 +1028,7 @@ class ResearchAgent:
             "tool_calls": 0,
             "agent_steps": 0,
             "boundary": new_boundary(),
+            "verify": False,
         }
         config: RunnableConfig = {
             "configurable": {"thread_id": session.session_id, "turn_ctx": ctx},
@@ -924,6 +1077,9 @@ class ResearchAgent:
             sources=ctx.sources,
             paper_labels=ctx.paper_labels,
             generation_latency_ms=ans.generation_latency_ms,
+            claim_checks=ans.claim_checks,
+            supported_rate=ans.supported_rate,
+            verification=ans.verification,
         )
 
     def confirm_pending_ingest(
@@ -946,6 +1102,13 @@ class ResearchAgent:
         )
         session.pending_ingests = pending
         return result
+
+
+def verify_answer_unavailable(answer: Answer, policy: VerificationPolicy, error: str) -> Answer:
+    """``answer`` unchanged, marked as not verified (the judge could not be set up)."""
+    return answer.model_copy(
+        update={"verification": VerificationInfo(policy=policy, status="error", error=error)}
+    )
 
 
 # --------------------------------------------------------------------------- module API

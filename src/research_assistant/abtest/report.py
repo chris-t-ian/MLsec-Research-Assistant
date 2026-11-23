@@ -1,5 +1,8 @@
 """Summaries (means, paired differences to the baseline) and the run report: summary.csv,
-report.md and two matplotlib figures."""
+verification_effect.csv, report.md and two matplotlib figures.
+
+Rows are experiment *arms*: a strategy alone (no claim verification) or ``strategy+mode`` for
+a verification mode (flag / remove / regenerate)."""
 
 from __future__ import annotations
 
@@ -18,11 +21,12 @@ from research_assistant.abtest.metrics import (
     compute_metrics,
     metric_specs,
 )
-from research_assistant.abtest.records import EvalRecord
+from research_assistant.abtest.records import EvalRecord, arm_name
 from research_assistant.abtest.runner import BASELINE, RunManifest
 from research_assistant.abtest.stats import Estimate, bootstrap_mean, paired_bootstrap
 
 SUMMARY_CSV = "summary.csv"
+EFFECT_CSV = "verification_effect.csv"
 REPORT_MD = "report.md"
 METRICS_PNG = "metrics_ci.png"
 SCATTER_PNG = "recall_vs_latency.png"
@@ -68,7 +72,7 @@ def per_question_values(
     k: int,
     claim_verifier: ClaimVerifier | None = None,
 ) -> dict[str, dict[str, dict[str, float]]]:
-    """strategy -> metric -> question id -> value (undefined values left out)."""
+    """arm -> metric -> question id -> value (undefined values left out)."""
     by_id = {q.id: q for q in questions}
     out: dict[str, dict[str, dict[str, float]]] = {}
     for rec in records:
@@ -77,7 +81,7 @@ def per_question_values(
             continue
         for metric, value in compute_metrics(rec, q, k, claim_verifier).items():
             if value is not None:
-                out.setdefault(rec.strategy, {}).setdefault(metric, {})[q.id] = value
+                out.setdefault(rec.arm, {}).setdefault(metric, {})[q.id] = value
     return out
 
 
@@ -124,6 +128,138 @@ def summarize(
         n_questions=n_questions,
         rows=rows,
     )
+
+
+# --------------------------------------------------------------------------- verification
+
+
+EFFECT_METRICS = ("supported_claim_rate", "key_fact_coverage", "total_tokens", "latency_s")
+
+
+class EffectRow(BaseModel):
+    """One metric of one (strategy, verification mode), compared with the same strategy
+    without verification ("off") on the same questions."""
+
+    strategy: str
+    mode: str
+    metric: str
+    estimate: Estimate
+    diff_vs_off: Estimate | None = None
+
+
+def verification_effect(
+    records: Sequence[EvalRecord],
+    questions: Sequence[GoldQuestion],
+    strategies: Sequence[str],
+    modes: Sequence[str],
+    *,
+    k: int,
+    seed: int,
+    n_resamples: int,
+    claim_verifier: ClaimVerifier | None = None,
+) -> list[EffectRow]:
+    """Per strategy and mode: supported-claim rate, key-fact coverage and cost, with paired
+    bootstrap differences to the same strategy's "off" arm. Empty with a single mode."""
+    if len(modes) < 2:
+        return []
+    values = per_question_values(records, questions, k, claim_verifier)
+    rows: list[EffectRow] = []
+    for strategy in strategies:
+        off = values.get(arm_name(strategy, "off"), {})
+        for mode in modes:
+            arm = values.get(arm_name(strategy, mode), {})
+            for metric in EFFECT_METRICS:
+                vals = arm.get(metric, {})
+                est = bootstrap_mean(list(vals.values()), n_resamples=n_resamples, seed=seed)
+                diff = None
+                if mode != "off" and "off" in modes:
+                    base = off.get(metric, {})
+                    paired = sorted(set(vals) & set(base))
+                    diff = paired_bootstrap(
+                        [vals[q] for q in paired],
+                        [base[q] for q in paired],
+                        n_resamples=n_resamples,
+                        seed=seed,
+                    )
+                rows.append(
+                    EffectRow(
+                        strategy=strategy, mode=mode, metric=metric, estimate=est, diff_vs_off=diff
+                    )
+                )
+    return rows
+
+
+def write_effect_csv(rows: Sequence[EffectRow], path: Path) -> None:
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(
+            [
+                "strategy",
+                "verification",
+                "metric",
+                "n",
+                "mean",
+                "ci_low",
+                "ci_high",
+                "n_paired",
+                "diff_vs_off",
+                "diff_ci_low",
+                "diff_ci_high",
+            ]
+        )
+        for r in rows:
+            d = r.diff_vs_off
+            w.writerow(
+                [
+                    r.strategy,
+                    r.mode,
+                    r.metric,
+                    r.estimate.n,
+                    r.estimate.mean,
+                    r.estimate.ci_low,
+                    r.estimate.ci_high,
+                    d.n if d else "",
+                    d.mean if d else "",
+                    d.ci_low if d else "",
+                    d.ci_high if d else "",
+                ]
+            )
+
+
+VERIFICATION_NOTE = (
+    "Supported-claim rate = supported claims / (cited claims + uncited factual sentences); "
+    "partially supported counts as not supported. Without verification (`off`) the answer "
+    "is checked after the turn, outside the measured tokens and latency. `flag` only marks "
+    "claims, so its answers equal `off` up to run-to-run variance; `regenerate` rewrites the "
+    "answer once when a claim is unsupported and reports the rate of the final answer; "
+    "`remove` reports the rate after unsupported sentences were cut. All rates come from "
+    "the same judge model; see `eval/label_claims.py` for its agreement with hand labels."
+)
+
+
+def render_effect(rows: Sequence[EffectRow], k: int) -> list[str]:
+    if not rows:
+        return []
+    specs = {s.name: s for s in metric_specs(k)}
+    lines = [
+        "## Verification effect",
+        "",
+        f"> {VERIFICATION_NOTE}",
+        "",
+        "| Strategy | Verification | Metric | n | Mean [95% CI] | n paired | Δ vs off [95% CI] |",
+        "|---|---|---|---:|---|---:|---|",
+    ]
+    for r in rows:
+        spec = specs[r.metric]
+        unit = f" ({spec.unit})" if spec.unit else ""
+        d = r.diff_vs_off
+        lines.append(
+            f"| {r.strategy} | {r.mode} | {spec.label}{unit} | {r.estimate.n} | "
+            f"{_fmt_est(r.estimate, spec)} | {d.n if d else '-'} | "
+            f"{_fmt_est(d, spec, signed=True) if d else '-'} |"
+        )
+    lines.append("")
+    return lines
 
 
 # --------------------------------------------------------------------------- formatting
@@ -194,6 +330,7 @@ def render_report(
     *,
     failed: Sequence[str] = (),
     figures: Sequence[str] = (),
+    effect: Sequence[EffectRow] = (),
 ) -> str:
     specs = metric_specs(summary.k)
     selected = [q for q in questions if q.id in set(manifest.question_ids)]
@@ -207,8 +344,11 @@ def render_report(
         f"- **Questions:** {len(selected)} ({n_in} in scope, {n_oos} out of scope); "
         f"questions with results: {summary.n_questions}",
         f"- **Strategies:** {', '.join(manifest.strategies)}",
+        f"- **Claim verification modes:** {', '.join(manifest.verification_modes)} "
+        f"(arms: {', '.join(manifest.arms())})",
         f"- **Baseline:** {summary.baseline or 'not in this run (no paired differences)'}",
-        f"- **Models:** answer `{manifest.main_model}`, judge `{manifest.judge_model}`, "
+        f"- **Models:** answer `{manifest.main_model}`, judge (key facts, refusals, claims) "
+        f"`{manifest.judge_model}`, "
         f"temperature {manifest.temperature}",
         f"- **Git commit:** `{commit}`",
         f"- **Gold file:** `{manifest.gold_file}` (sha256 `{manifest.gold_sha256[:12]}`)",
@@ -237,8 +377,8 @@ def render_report(
         "out-of-scope questions only, cost uses all. Retrieved chunks are those of all "
         "`search_knowledge_base` calls of the turn, in call order. `n` counts questions with a "
         "defined value (e.g. gold-citation rate needs at least one citation); differences use "
-        "only questions defined for both strategies (`n` paired). The supported-claim rate is "
-        "a hook for step 14 and is empty until a claim verifier is plugged in.",
+        "only questions defined for both strategies (`n` paired). The supported-claim rate "
+        "needs at least one claim in the answer.",
         "",
     ]
     for strategy in summary.strategies:
@@ -261,6 +401,7 @@ def render_report(
                 cells += [str(d.n if d else 0), _fmt_est(d, spec, signed=True)]
             lines.append("| " + " | ".join(cells) + " |")
         lines.append("")
+    lines += render_effect(effect, summary.k)
     if figures:
         lines += ["## Figures", ""]
         lines += [f"![{name}]({name})" for name in figures]
@@ -404,8 +545,11 @@ def write_report(
     questions: Sequence[GoldQuestion],
     *,
     failed: Sequence[str] = (),
+    effect: Sequence[EffectRow] = (),
 ) -> Path:
     write_summary_csv(summary, run_dir / SUMMARY_CSV)
+    if effect:
+        write_effect_csv(effect, run_dir / EFFECT_CSV)
     figures = []
     plot_metric_means(summary, run_dir / METRICS_PNG)
     plot_recall_vs_latency(summary, run_dir / SCATTER_PNG)
@@ -414,7 +558,7 @@ def write_report(
             figures.append(name)
     report = run_dir / REPORT_MD
     report.write_text(
-        render_report(summary, manifest, questions, failed=failed, figures=figures),
+        render_report(summary, manifest, questions, failed=failed, figures=figures, effect=effect),
         encoding="utf-8",
     )
     return report
@@ -422,12 +566,15 @@ def write_report(
 
 __all__ = [
     "POWER_NOTE",
+    "EffectRow",
     "Summary",
     "per_question_values",
     "plot_metric_means",
     "plot_recall_vs_latency",
     "render_report",
     "summarize",
+    "verification_effect",
+    "write_effect_csv",
     "write_report",
     "write_summary_csv",
 ]

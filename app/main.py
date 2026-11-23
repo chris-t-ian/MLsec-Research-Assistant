@@ -24,9 +24,12 @@ from chainlit.utils import utc_now
 from pydantic import ValidationError
 from render import (
     RAG_STEP_NAME,
+    ROOT_STEP_NAME,
     ChainlitSink,
     IngestTaskSink,
     answer_markdown,
+    claim_element,
+    ensure_files_dir,
     format_tool_result,
     help_element,
     md,
@@ -34,7 +37,6 @@ from render import (
     rag_markdown,
     rag_summary,
     run_summary,
-    source_element,
 )
 
 from research_assistant.agent import SessionState, TurnResult
@@ -312,9 +314,11 @@ async def _render_turn(
     message.content = answer_markdown(result)
     elements: list[Any] = []
     if not result.blocked:
-        elements += [source_element(c) for c in result.citations]
+        elements += [sink.reuse_source(c) for c in result.citations]
+        elements += [claim_element(c, result.citations) for c in result.claim_checks]
         elements += sink.files
     message.elements = elements
+    ensure_files_dir()
     strategy = session.strategy or get_settings().agent.default_strategy
     message.metadata = turn_metadata(result, strategy, session.top_k)
     message.actions = export_actions()
@@ -413,7 +417,7 @@ async def on_message(message: cl.Message) -> None:
             await cl.Message(content=await cl.make_async(quick_reference)()).send()
             return
         session = _session()
-        root = cl.Step(name="Research", type="run", show_input=False)
+        root = cl.Step(name=ROOT_STEP_NAME, type="run", show_input=False)
         root.start = utc_now()
         await root.send()
         # Streamed messages get no timestamp from Chainlit; without one the stored answer
@@ -423,6 +427,7 @@ async def on_message(message: cl.Message) -> None:
         try:
             result = await cl.make_async(run_turn)(message.content, session, sink)
         finally:
+            root.name = ROOT_STEP_NAME  # it showed the running stage
             root.end = utc_now()
             await root.update()
         root.output = run_summary(result)

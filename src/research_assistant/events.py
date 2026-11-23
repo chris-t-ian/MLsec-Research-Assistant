@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from research_assistant.models import Answer
 
 
 @runtime_checkable
@@ -20,6 +23,12 @@ class EventSink(Protocol):
     def tool_result(self, name: str, args: dict[str, Any], result: Any) -> None: ...
 
     def token(self, text: str) -> None: ...
+
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        """The generated answer passed the output checks. ``verifying``: its claims are
+        checked next, so the final answer may still change (lets a UI show the sources
+        while the check runs)."""
+        ...
 
 
 class NullSink:
@@ -39,8 +48,36 @@ class NullSink:
     def token(self, text: str) -> None:
         pass
 
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        pass
 
-EventKind = Literal["step_started", "step_finished", "tool_result", "token"]
+
+class NoTokenSink:
+    """Forwards steps and tool results to ``inner`` but drops streamed tokens (used when an
+    answer is regenerated and the UI should only show the final text)."""
+
+    def __init__(self, inner: EventSink) -> None:
+        self.inner = inner
+
+    def step_started(self, step_id: str, name: str, input: Any) -> None:
+        self.inner.step_started(step_id, name, input)
+
+    def step_finished(
+        self, step_id: str, output: Any, metadata: dict[str, Any] | None = None
+    ) -> None:
+        self.inner.step_finished(step_id, output, metadata)
+
+    def tool_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        self.inner.tool_result(name, args, result)
+
+    def token(self, text: str) -> None:
+        pass
+
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        self.inner.answer_ready(answer, verifying)
+
+
+EventKind = Literal["step_started", "step_finished", "tool_result", "token", "answer_ready"]
 
 
 class RecordedEvent(BaseModel):
@@ -70,6 +107,9 @@ class RecordingSink:
 
     def token(self, text: str) -> None:
         self._add("token", text=text)
+
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        self._add("answer_ready", answer=answer.model_dump(mode="json"), verifying=verifying)
 
     def kinds(self) -> list[EventKind]:
         return [e.kind for e in self.events]

@@ -90,6 +90,14 @@ agent:
   max_agent_steps: 6          # agent model calls per turn
   max_tool_result_chars: 6000
 
+verification:
+  # Claim check after every answer (judge model, temperature 0):
+  #   off | flag (badges only) | remove (drop unsupported sentences) | regenerate (one retry)
+  policy: flag
+  batch_size: 10        # claims per judge call
+  context_chars: 300    # chunk text shown around an evidence span in the UI
+  max_chunk_chars: 6000 # characters of one cited chunk given to the judge
+
 security:
   max_token_chars: 200        # reject single whitespace-free tokens longer than this
   injection:

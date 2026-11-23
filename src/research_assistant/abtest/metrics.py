@@ -66,10 +66,26 @@ def correct_refusal(correct: bool | None) -> float | None:
 
 
 class ClaimVerifier(Protocol):
-    """Hook for the supported-claim rate (step 14): share of answer claims that the cited
-    chunks support. Return None when the rate cannot be computed for a record."""
+    """Hook for the supported-claim rate: share of answer claims that the cited chunks
+    support. Return None when the rate cannot be computed for a record."""
 
     def supported_claim_rate(self, record: EvalRecord, question: GoldQuestion) -> float | None: ...
+
+
+class StoredClaimRate:
+    """:class:`ClaimVerifier` reading the claim check stored on the record (computed by the
+    agent's verify node, or after the turn for runs without verification).
+
+    Supported claims / (cited claims + uncited factual sentences); partially supported
+    claims count as not supported. None if the check did not run or found no claims."""
+
+    def supported_claim_rate(self, record: EvalRecord, question: GoldQuestion) -> float | None:
+        if not record.claims_checked or record.claim_error is not None:
+            return None
+        return record.supported_rate
+
+
+STORED_CLAIM_RATE = StoredClaimRate()
 
 
 def metric_specs(k: int) -> list[MetricSpec]:
@@ -107,7 +123,8 @@ def metric_specs(k: int) -> list[MetricSpec]:
             "Supported-claim rate",
             "answer",
             True,
-            description="share of claims supported by the cited chunks (step 14 hook)",
+            description="share of answer claims (cited + uncited factual sentences) the claim "
+            "judge found supported by the cited chunks; partial counts as not supported",
         ),
         MetricSpec(
             "correct_refusal",
@@ -142,7 +159,8 @@ def compute_metrics(
     claim_verifier: ClaimVerifier | None = None,
 ) -> dict[str, float | None]:
     """All metrics of one record. Retrieval and answer metrics only for in-scope questions,
-    correct refusal only for out-of-scope ones; cost for all."""
+    correct refusal only for out-of-scope ones; cost for all. The supported-claim rate comes
+    from ``claim_verifier`` (default: the claim check stored on the record)."""
     values: dict[str, float | None] = {s.name: None for s in metric_specs(k)}
     judge = record.judge if record.judge and record.judge.ok else None
     if question.in_scope:
@@ -154,8 +172,8 @@ def compute_metrics(
         values["gold_citation_rate"] = gold_citation_rate(
             record.cited_arxiv_ids, question.gold_arxiv_ids
         )
-        if claim_verifier is not None:
-            values["supported_claim_rate"] = claim_verifier.supported_claim_rate(record, question)
+        verifier = claim_verifier or STORED_CLAIM_RATE
+        values["supported_claim_rate"] = verifier.supported_claim_rate(record, question)
     elif judge is not None and judge.refusal is not None:
         values["correct_refusal"] = correct_refusal(judge.refusal.correct)
     values["total_tokens"] = float(record.token_usage.total_tokens)
@@ -164,8 +182,10 @@ def compute_metrics(
 
 
 __all__ = [
+    "STORED_CLAIM_RATE",
     "ClaimVerifier",
     "MetricSpec",
+    "StoredClaimRate",
     "compute_metrics",
     "correct_refusal",
     "gold_citation_rate",

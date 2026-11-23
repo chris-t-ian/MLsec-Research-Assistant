@@ -60,3 +60,47 @@ a.element-link:focus-visible {
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
 }
+
+/* Claim badges (public/claims.js tags the "✓ C3"-style element links after each sentence).
+   Status colors are tinted pills like the citation badges; the glyph carries the meaning
+   too, so color is never the only cue. */
+a.element-link.claim-badge {
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums;
+  padding: 0 0.4rem !important;
+}
+
+a.element-link.claim-supported {
+  background-color: hsl(152 60% 40% / 0.12) !important;
+  color: hsl(152 65% 28%) !important;
+  border-color: hsl(152 60% 40% / 0.45);
+}
+
+a.element-link.claim-partial {
+  background-color: hsl(38 95% 50% / 0.14) !important;
+  color: hsl(30 85% 32%) !important;
+  border-color: hsl(38 95% 45% / 0.5);
+}
+
+a.element-link.claim-unsupported {
+  background-color: hsl(0 75% 50% / 0.12) !important;
+  color: hsl(0 70% 38%) !important;
+  border-color: hsl(0 75% 50% / 0.45);
+}
+
+a.element-link.claim-uncited {
+  background-color: hsl(var(--muted)) !important;
+  color: hsl(var(--muted-foreground)) !important;
+  border: 1px dashed hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark a.element-link.claim-supported { color: hsl(152 55% 62%) !important; }
+.dark a.element-link.claim-partial { color: hsl(40 90% 62%) !important; }
+.dark a.element-link.claim-unsupported { color: hsl(0 80% 70%) !important; }
+
+a.element-link.claim-badge:hover,
+a.element-link.claim-badge:focus-visible {
+  filter: brightness(0.95);
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}

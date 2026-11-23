@@ -33,19 +33,26 @@ from research_assistant.abtest.records import (
     RetrievedChunk,
     SearchRecord,
 )
-from research_assistant.abtest.report import summarize, write_report
-from research_assistant.abtest.runner import ResultStore, RunManifest, run_eval
-from research_assistant.abtest.stats import bootstrap_mean, paired_bootstrap
+from research_assistant.abtest.report import summarize, verification_effect, write_report
+from research_assistant.abtest.runner import ClaimMeasurement, ResultStore, RunManifest, run_eval
+from research_assistant.abtest.stats import (
+    accuracy,
+    bootstrap_mean,
+    cohens_kappa,
+    paired_bootstrap,
+)
 from research_assistant.agent.graph import UNEXPECTED_ERROR_MESSAGE
-from research_assistant.agent.state import SessionState, TurnResult
+from research_assistant.agent.state import SessionState, SourceRef, TurnResult
 from research_assistant.events import EventSink
 from research_assistant.llm import LLMCallError
 from research_assistant.models import (
     CandidateScore,
     Citation,
+    ClaimCheck,
     RetrievalTrace,
     StageTrace,
     TokenUsage,
+    VerificationInfo,
 )
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "eval" / "gold_questions.example.yaml"
@@ -602,3 +609,180 @@ def test_summarize_and_report(tmp_path: Path) -> None:
     assert (tmp_path / "summary.csv").read_text().startswith("strategy,metric,n,mean")
     assert (tmp_path / "metrics_ci.png").stat().st_size > 0
     assert (tmp_path / "recall_vs_latency.png").stat().st_size > 0
+
+
+def test_llm_failure_answers_are_not_stored_and_cached_ones_are_rerun(tmp_path: Path) -> None:
+    from research_assistant.generation.answer import LLM_FAILED_MESSAGE
+
+    questions = [q("1"), q("2")]
+    manifest = _manifest(["1", "2"], ["baseline_dense"])
+    store = ResultStore(tmp_path / "results.jsonl")
+    # A failed answer stored by an older harness version must be rerun, not reused.
+    old = rec("baseline_dense", "1").model_copy(update={"answer": LLM_FAILED_MESSAGE})
+    store.append(old)
+    calls: list[str] = []
+
+    def turn(question: str, session: SessionState, sink: EventSink) -> TurnResult:
+        calls.append(question)
+        if question == "Question 2?":
+            return _turn_result(question, session, answer=LLM_FAILED_MESSAGE)
+        return _turn_result(question, session)
+
+    out = run_eval(manifest, questions, store, turn, FakeJudge())
+    assert calls == ["Question 1?", "Question 2?"]
+    assert out.failed == ["baseline_dense/2"]
+    assert [r.question_id for r in out.records] == ["1"]
+    assert store.load()[("baseline_dense", "off", "1")].answer == "An answer"
+    assert ("baseline_dense", "off", "2") not in store.load()
+
+
+def test_run_stops_after_consecutive_failures(tmp_path: Path) -> None:
+    from research_assistant.abtest.runner import EvalRunError
+
+    questions = [q(str(i)) for i in range(1, 6)]
+    manifest = _manifest([x.id for x in questions], ["baseline_dense"])
+    store = ResultStore(tmp_path / "results.jsonl")
+    calls: list[str] = []
+
+    def turn(question: str, session: SessionState, sink: EventSink) -> TurnResult:
+        calls.append(question)
+        if question == "Question 1?":
+            return _turn_result(question, session)
+        return _turn_result(question, session, answer=UNEXPECTED_ERROR_MESSAGE)
+
+    with pytest.raises(EvalRunError, match="--resume"):
+        run_eval(manifest, questions, store, turn, FakeJudge(), max_consecutive_failures=3)
+    assert len(calls) == 4  # q1 ok, q2-q4 failed, q5 never tried
+    assert list(store.load()) == [("baseline_dense", "off", "1")]
+
+
+# --------------------------------------------------------------------------- claim verification
+
+
+def _checks(statuses: list[str]) -> list[ClaimCheck]:
+    return [
+        ClaimCheck(index=i, sentence=f"S{i}.", start=0, end=3, status=s)  # type: ignore[arg-type]
+        for i, s in enumerate(statuses, start=1)
+    ]
+
+
+def test_old_records_default_to_off_and_have_no_claim_rate() -> None:
+    line = rec("hybrid", "1").model_dump_json(exclude={"verification", "claims_checked"})
+    old = EvalRecord.model_validate_json(line)
+    assert old.verification == "off" and old.key == ("hybrid", "off", "1") and old.arm == "hybrid"
+    assert compute_metrics(old, q("1"), 8)["supported_claim_rate"] is None
+    checked = old.model_copy(update={"claims_checked": True, "supported_rate": 0.75})
+    assert compute_metrics(checked, q("1"), 8)["supported_claim_rate"] == 0.75
+    failed = checked.model_copy(update={"claim_error": "judge down"})
+    assert compute_metrics(failed, q("1"), 8)["supported_claim_rate"] is None
+
+
+def test_verification_modes_are_an_experiment_dimension(tmp_path: Path) -> None:
+    questions = [q("1"), q("2"), q("3", "out_of_scope", gold=[])]
+    manifest = _manifest(["1", "2", "3"], ["baseline_dense", "hybrid"]).model_copy(
+        update={"verification_modes": ["off", "regenerate"]}
+    )
+    assert manifest.arms() == [
+        "baseline_dense",
+        "baseline_dense+regenerate",
+        "hybrid",
+        "hybrid+regenerate",
+    ]
+    store = ResultStore(tmp_path / "results.jsonl")
+    seen_modes: list[str | None] = []
+
+    def turn(question: str, session: SessionState, sink: EventSink) -> TurnResult:
+        seen_modes.append(session.verification)
+        res = _turn_result(question, session).model_copy(
+            update={"sources": [SourceRef(number=1, chunk_id="g:1", arxiv_id="1", label="L")]}
+        )
+        if session.verification == "regenerate":
+            checks = _checks(["supported", "supported", "partially_supported"])
+            info = VerificationInfo(policy="regenerate", status="ok", regenerated=True)
+            res = res.model_copy(
+                update={"claim_checks": checks, "supported_rate": 2 / 3, "verification": info}
+            )
+        return res
+
+    measured: list[str] = []
+
+    def measure(r: EvalRecord) -> ClaimMeasurement:
+        measured.append(f"{r.arm}/{r.question_id}")
+        assert r.sources == {1: "g:1"}
+        checks = _checks(["supported", "unsupported", "uncited"])
+        return ClaimMeasurement(checks=checks, supported_rate=1 / 3)
+
+    out = run_eval(manifest, questions, store, turn, FakeJudge(), measure=measure)
+    assert len(out.records) == 12 and out.n_new == 12
+    assert seen_modes == ["off", "regenerate"] * 6
+    # Only "off" answers of in-scope questions are checked after the turn.
+    assert measured == ["baseline_dense/1", "hybrid/1", "baseline_dense/2", "hybrid/2"]
+    loaded = store.load()
+    assert loaded[("hybrid", "regenerate", "1")].supported_rate == pytest.approx(2 / 3)
+    assert loaded[("hybrid", "regenerate", "1")].claims_checked
+    assert loaded[("hybrid", "off", "2")].supported_rate == pytest.approx(1 / 3)
+
+    # Resume: nothing new to run or measure.
+    measured.clear()
+    again = run_eval(manifest, questions, store, turn, FakeJudge(), measure=measure)
+    assert again.n_new == 0 and again.n_rejudged == 0 and measured == []
+
+    summary = summarize(out.records, questions, manifest.arms(), k=8, seed=0, n_resamples=200)
+    row = summary.get("hybrid+regenerate", "supported_claim_rate")
+    assert row is not None and row.estimate.mean == pytest.approx(2 / 3)
+    effect = verification_effect(
+        out.records,
+        questions,
+        manifest.strategies,
+        manifest.verification_modes,
+        k=8,
+        seed=0,
+        n_resamples=200,
+    )
+    rate = next(
+        r
+        for r in effect
+        if (r.strategy, r.mode, r.metric) == ("hybrid", "regenerate", "supported_claim_rate")
+    )
+    assert rate.diff_vs_off is not None and rate.diff_vs_off.n == 2
+    assert rate.diff_vs_off.mean == pytest.approx(1 / 3)
+    report = write_report(tmp_path, summary, manifest, questions, effect=effect)
+    text = report.read_text()
+    assert "## Verification effect" in text and "## hybrid+regenerate" in text
+    assert "| hybrid | regenerate | Supported-claim rate | 2 | 0.667" in text
+    assert (tmp_path / "verification_effect.csv").read_text().startswith("strategy,verification")
+
+
+def test_resume_measures_cached_off_records_without_claim_check(tmp_path: Path) -> None:
+    store = ResultStore(tmp_path / "results.jsonl")
+    old = rec("baseline_dense", "1").model_copy(
+        update={"raw_answer": "A [1].", "sources": {1: "c"}}
+    )
+    store.append(old)
+    calls: list[str] = []
+
+    def turn(question: str, session: SessionState, sink: EventSink) -> TurnResult:
+        raise AssertionError("cached turn must not rerun")
+
+    def measure(r: EvalRecord) -> ClaimMeasurement:
+        calls.append(r.question_id)
+        return ClaimMeasurement(checks=_checks(["supported"]), supported_rate=1.0)
+
+    manifest = _manifest(["1"], ["baseline_dense"])
+    out = run_eval(manifest, [q("1")], store, turn, FakeJudge(), measure=measure)
+    assert calls == ["1"] and out.n_rejudged == 1
+    assert store.load()[("baseline_dense", "off", "1")].supported_rate == 1.0
+
+
+def test_accuracy_and_cohens_kappa() -> None:
+    a = ["s", "s", "u", "p", "s", "u"]
+    b = ["s", "u", "u", "p", "s", "s"]
+    assert accuracy(a, b) == pytest.approx(4 / 6)
+    # p_e = (3/6)(3/6) + (2/6)(2/6) + (1/6)(1/6) = 14/36
+    assert cohens_kappa(a, b) == pytest.approx((4 / 6 - 14 / 36) / (1 - 14 / 36))
+    assert cohens_kappa(["s", "u"], ["s", "u"]) == 1.0
+    assert cohens_kappa(["s", "s"], ["s", "s"]) == 1.0
+    assert cohens_kappa(["s", "u"], ["u", "s"]) == pytest.approx(-1.0)
+    assert cohens_kappa([], []) is None and accuracy([], []) is None
+    with pytest.raises(ValueError):
+        cohens_kappa(["s"], [])

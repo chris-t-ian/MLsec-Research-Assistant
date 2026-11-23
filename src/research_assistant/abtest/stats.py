@@ -1,8 +1,9 @@
-"""Bootstrap confidence intervals over questions (fixed seed, reproducible)."""
+"""Bootstrap confidence intervals over questions (fixed seed, reproducible) and agreement
+statistics for judge validation."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 
 import numpy as np
 from pydantic import BaseModel
@@ -68,4 +69,39 @@ def paired_bootstrap(
     return _estimate(t - b, n_resamples, seed, level)
 
 
-__all__ = ["DEFAULT_RESAMPLES", "DEFAULT_SEED", "Estimate", "bootstrap_mean", "paired_bootstrap"]
+def accuracy(a: Sequence[Hashable], b: Sequence[Hashable]) -> float | None:
+    """Share of positions where the two raters agree (None for empty input)."""
+    if len(a) != len(b):
+        raise ValueError("ratings must have the same length")
+    if not a:
+        return None
+    return sum(1 for x, y in zip(a, b, strict=True) if x == y) / len(a)
+
+
+def cohens_kappa(a: Sequence[Hashable], b: Sequence[Hashable]) -> float | None:
+    """Cohen's kappa of two raters over the same items (nominal labels).
+
+    kappa = (p_o - p_e) / (1 - p_e), p_e from each rater's marginal label frequencies.
+    None for empty input. p_e = 1 only if both raters give one and the same label to every
+    item, which is perfect agreement: 1.0.
+    """
+    p_o = accuracy(a, b)
+    if p_o is None:
+        return None
+    n = len(a)
+    labels = set(a) | set(b)
+    p_e = sum((list(a).count(lab) / n) * (list(b).count(lab) / n) for lab in labels)
+    if p_e >= 1.0:
+        return 1.0
+    return (p_o - p_e) / (1.0 - p_e)
+
+
+__all__ = [
+    "DEFAULT_RESAMPLES",
+    "DEFAULT_SEED",
+    "Estimate",
+    "accuracy",
+    "bootstrap_mean",
+    "cohens_kappa",
+    "paired_bootstrap",
+]

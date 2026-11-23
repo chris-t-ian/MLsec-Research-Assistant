@@ -25,6 +25,7 @@ from research_assistant.security.injection_detect import InjectionDetector
 from research_assistant.security.tool_policy import AuditLog, ToolPolicy
 from research_assistant.tools.arxiv_tools import ArxivSearchArgs
 from research_assistant.tools.base import StaticKnowledgeBase, ToolDeps
+from research_assistant.verification.verifier import JudgeVerdict
 
 # --------------------------------------------------------------------------- fakes
 
@@ -88,6 +89,32 @@ class FakeStreamingLLM:
         return StreamResult(text=text, usage=TokenUsage(total_tokens=10), model="fake/model")
 
 
+class FakeClaimJudge:
+    """Claim judge: every claim supported, quoting the first words of the LiRA chunk."""
+
+    def __init__(self, label: str = "supported") -> None:
+        self.label = label
+        self.prompts: list[tuple[str, str]] = []
+
+    def invoke_structured(
+        self, schema: type[Any], system: str, user: str
+    ) -> tuple[Any, TokenUsage]:
+        self.prompts.append((system, user))
+        ids = [int(m) for m in re.findall(r"^C(\d+) \(cites", user, re.MULTILINE)]
+        span = "LiRA compares the target loss" if self.label != "unsupported" else ""
+        verdicts = [
+            JudgeVerdict(
+                claim_id=i,
+                label=self.label,  # type: ignore[arg-type]
+                evidence_span=span,
+                source_id=1,
+                rationale="ok",
+            )
+            for i in ids
+        ]
+        return schema(verdicts=verdicts), TokenUsage(total_tokens=5)
+
+
 def call(name: str, args: dict[str, Any], cid: str) -> dict[str, Any]:
     return {"name": name, "args": args, "id": cid, "type": "tool_call"}
 
@@ -110,6 +137,7 @@ def make_agent(
         tool_deps=ToolDeps(settings=settings, kb=StaticKnowledgeBase({"1610.05820"})),
         policy=ToolPolicy(6, AuditLog(None)),
         detector=InjectionDetector(settings.security.injection),
+        judge=FakeClaimJudge(),
     )
     return ResearchAgent(deps), llm, gen, index
 
@@ -157,7 +185,15 @@ def test_mocked_run_calls_dp_accountant() -> None:
         for e in sink.events
         if e.kind == "step_started" and e.data["step_id"].startswith("agent:")
     ]
-    assert nodes == ["validate_input", "detect_injection", "agent", "tools", "agent", "finalize"]
+    assert nodes == [
+        "validate_input",
+        "detect_injection",
+        "agent",
+        "tools",
+        "agent",
+        "finalize",
+        "verify",
+    ]
     assert [e.data["name"] for e in sink.events if e.kind == "tool_result"] == ["dp_accountant"]
     assert [t.node for t in res.trace] == nodes
     assert agent.deps.policy.audit.records[0].tool == "dp_accountant"
@@ -474,3 +510,156 @@ def test_turn_records_rag_trace_data() -> None:
     for key in ("retrievals", "sources", "paper_labels", "generation_latency_ms"):
         old.pop(key)
     assert TurnResult.model_validate(old).retrievals == []
+
+
+# --------------------------------------------------------------------------- claim verification
+
+
+class SentenceJudge(FakeClaimJudge):
+    """Supported if the claim mentions Gaussians, unsupported otherwise."""
+
+    def invoke_structured(
+        self, schema: type[Any], system: str, user: str
+    ) -> tuple[Any, TokenUsage]:
+        self.prompts.append((system, user))
+        verdicts = []
+        for m in re.finditer(r"^C(\d+) \(cites [^)]*\): (.*)$", user, re.MULTILINE):
+            ok = "Gaussians" in m.group(2)
+            verdicts.append(
+                JudgeVerdict(
+                    claim_id=int(m.group(1)),
+                    label="supported" if ok else "unsupported",
+                    evidence_span="Gaussians fitted to IN and OUT" if ok else "",
+                    source_id=1 if ok else None,
+                    rationale="r",
+                )
+            )
+        return schema(verdicts=verdicts), TokenUsage(total_tokens=5)
+
+
+TWO_CLAIMS = "LiRA fits Gaussians to losses [1]. LiRA was invented by aliens [1]."
+
+
+def _search_script() -> list[AIMessage]:
+    return [
+        AIMessage(
+            content="", tool_calls=[call("search_knowledge_base", {"question": "LiRA"}, "c1")]
+        )
+    ]
+
+
+def _with_judge(agent: ResearchAgent, judge: Any) -> ResearchAgent:
+    agent.deps._judge = judge
+    return agent
+
+
+def test_verify_flag_adds_claim_checks_and_step() -> None:
+    agent, _, _, _ = make_agent(_search_script(), reply=TWO_CLAIMS)
+    _with_judge(agent, SentenceJudge())
+    sink = RecordingSink()
+    res = run_turn("How does LiRA work?", session(), sink, agent)
+    assert [c.status for c in res.claim_checks] == ["supported", "unsupported"]
+    assert res.supported_rate == 0.5
+    assert res.verification is not None and res.verification.policy == "flag"
+    assert "aliens" in res.answer  # flag never changes the text
+    names = [e.data["name"] for e in sink.events if e.kind == "step_started"]
+    assert names[-2:] == ["verify", "verify_claims"]
+    assert res.trace[-1].node == "verify"
+    assert res.token_usage.total_tokens == 10 + 5  # generation + judge
+
+
+def test_answer_ready_comes_before_the_claim_check() -> None:
+    agent, _, _, _ = make_agent(_search_script(), reply=TWO_CLAIMS)
+    _with_judge(agent, SentenceJudge())
+    sink = RecordingSink()
+    run_turn("How does LiRA work?", session(), sink, agent)
+    order = [
+        e.kind if e.kind == "answer_ready" else e.data.get("name")
+        for e in sink.events
+        if e.kind in ("answer_ready", "step_started")
+    ]
+    assert order.index("answer_ready") < order.index("verify")
+    ready = next(e for e in sink.events if e.kind == "answer_ready")
+    assert ready.data["verifying"] is True
+    assert ready.data["answer"]["citations"]  # the UI links sources from these
+
+    s = session()
+    s.verification = "off"
+    sink = RecordingSink()
+    run_turn("How does LiRA work?", s, sink, agent)
+    ready = next(e for e in sink.events if e.kind == "answer_ready")
+    assert ready.data["verifying"] is False
+
+
+def test_verify_remove_policy_updates_answer_and_memory() -> None:
+    agent, llm, _, _ = make_agent([*_search_script(), AIMessage(content="ok")], reply=TWO_CLAIMS)
+    _with_judge(agent, SentenceJudge())
+    s = session()
+    s.verification = "remove"
+    res = run_turn("How does LiRA work?", s, RecordingSink(), agent)
+    assert "aliens" not in res.answer and "removed because" in res.answer
+    assert res.verification is not None and res.verification.removed == 1
+    assert [c.status for c in res.claim_checks] == ["supported"]
+    run_turn("Follow-up?", s, RecordingSink(), agent)
+    # Conversation memory holds the verified answer, not the draft.
+    history = [str(m.content) for m in llm.prompts[-1]]
+    assert not any("aliens" in h for h in history)
+    assert any("removed because" in h for h in history)
+
+
+def test_verify_regenerate_policy_retries_once_without_streaming() -> None:
+    replies = iter([TWO_CLAIMS, "LiRA fits Gaussians to losses [1]."])
+    agent, _, gen, _ = make_agent(_search_script(), reply=lambda system, user: next(replies))
+    _with_judge(agent, SentenceJudge())
+    s = session()
+    s.verification = "regenerate"
+    sink = RecordingSink()
+    res = run_turn("How does LiRA work?", s, sink, agent)
+    assert len(gen.prompts) == 2
+    _, revision_user = gen.prompts[1]
+    b = re.search(r"<<REVISION-([0-9a-f]{8})>>", revision_user).group(1)  # type: ignore[union-attr]
+    assert "LiRA was invented by aliens [1]." in revision_user.split(f"<<REVISION-{b}>>")[-1]
+    assert s.canary in gen.prompts[1][0]
+    assert res.raw_answer == "LiRA fits Gaussians to losses [1]."
+    assert res.supported_rate == 1.0
+    assert res.verification is not None and res.verification.regenerated
+    assert res.verification.initial_supported_rate == 0.5
+    # Only the first draft was streamed; the revision ran with its own step ids.
+    assert sink.text() == TWO_CLAIMS
+    gen_steps = [e.data["step_id"] for e in sink.events if e.kind == "step_started"]
+    assert "generation:baseline_dense:revision:generate" in gen_steps
+
+
+def test_verify_off_and_skipped_cases() -> None:
+    agent, _, _, _ = make_agent(_search_script(), reply=TWO_CLAIMS)
+    judge = SentenceJudge()
+    _with_judge(agent, judge)
+    s = session()
+    s.verification = "off"
+    res = run_turn("How does LiRA work?", s, RecordingSink(), agent)
+    assert res.claim_checks == [] and res.verification is None and judge.prompts == []
+    assert [t.node for t in res.trace][-1] == "finalize"
+
+    # Generation failure: nothing to verify.
+    agent2, _, gen2, _ = make_agent(_search_script())
+    _with_judge(agent2, judge)
+
+    def boom(system: str, user: str) -> str:
+        raise LLMCallError("down")
+
+    gen2.reply = boom
+    res2 = run_turn("How does LiRA work?", session(), RecordingSink(), agent2)
+    assert res2.verification is None and judge.prompts == []
+
+
+def test_verify_judge_failure_keeps_answer() -> None:
+    class DownJudge:
+        def invoke_structured(self, schema: type[Any], system: str, user: str) -> Any:
+            raise LLMCallError("LLM call for JudgeVerdicts failed (APIConnectionError)")
+
+    agent, _, _, _ = make_agent(_search_script(), reply=TWO_CLAIMS)
+    _with_judge(agent, DownJudge())
+    res = run_turn("How does LiRA work?", session(), RecordingSink(), agent)
+    assert "aliens" in res.answer and res.claim_checks == []
+    assert res.verification is not None and res.verification.status == "error"
+    assert "APIConnectionError" not in (res.verification.error or "")

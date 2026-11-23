@@ -215,6 +215,54 @@ class ToolCitation(_Frozen):
     ok: bool
 
 
+# --------------------------------------------------------------------------- verification
+
+JudgeLabel = Literal["supported", "partially_supported", "unsupported"]
+ClaimStatus = Literal["supported", "partially_supported", "unsupported", "uncited"]
+VerificationPolicy = Literal["off", "flag", "remove", "regenerate"]
+
+
+class ClaimCheck(_Frozen):
+    """Verdict on one sentence of an answer (see research_assistant.verification).
+
+    ``start``/``end`` locate the sentence in :attr:`Answer.raw_text`. ``status`` is the final
+    label after the evidence check; ``judge_label`` is what the judge said before it.
+    """
+
+    index: int = Field(ge=1, description="Claim number, shown as 'C<index>'.")
+    sentence: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    cited: list[int] = Field(default_factory=list, description="Source numbers [n] cited.")
+    status: ClaimStatus
+    judge_label: JudgeLabel | None = None
+    evidence_span: str = ""
+    evidence_source: int | None = Field(default=None, description="Source number of the span.")
+    evidence_chunk_id: str | None = None
+    # Chunk text around the span (for highlighting in the UI), whitespace-normalized.
+    evidence_before: str = ""
+    evidence_after: str = ""
+    rationale: str = ""
+    note: str = Field(default="", description="e.g. 'fabricated evidence'.")
+
+
+class VerificationInfo(_Frozen):
+    """How the claims of an answer were verified and what the policy did."""
+
+    policy: VerificationPolicy
+    status: Literal["ok", "error", "skipped"]
+    error: str | None = None
+    judge_model: str | None = None
+    n_judge_calls: int = Field(default=0, ge=0)
+    regenerated: bool = False
+    removed: int = Field(default=0, ge=0, description="Sentences removed by the policy.")
+    initial_supported_rate: float | None = Field(
+        default=None, description="Supported rate before removal / regeneration."
+    )
+    token_usage: TokenUsage = TokenUsage()
+    latency_ms: float = Field(default=0.0, ge=0)
+
+
 class Answer(_Frozen):
     question: str
     text: str = Field(description="Answer with markers rendered as '(Shokri et al. 2017 [1])'.")
@@ -233,6 +281,12 @@ class Answer(_Frozen):
     generation_token_usage: TokenUsage = TokenUsage()
     latency_ms: float = Field(default=0.0, ge=0)
     generation_latency_ms: float = Field(default=0.0, ge=0)
+    claim_checks: list[ClaimCheck] = Field(default_factory=list)
+    supported_rate: float | None = Field(
+        default=None,
+        description="supported / (cited claims + uncited factual sentences); None if none.",
+    )
+    verification: VerificationInfo | None = None
 
 
 # --------------------------------------------------------------------------- ingest

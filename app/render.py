@@ -20,14 +20,21 @@ from urllib.parse import quote
 
 import chainlit as cl
 import plotly.graph_objects as go
+from chainlit.config import FILES_DIRECTORY
 from chainlit.utils import utc_now
 from plotly.subplots import make_subplots
 
 from research_assistant.agent import TurnResult
 from research_assistant.app_guide import GuideAnswer, HelpSection, help_ref_name
 from research_assistant.generation.answer import citation_ref_name, render_with_references
-from research_assistant.models import Citation, SecurityEvent, ToolResult
+from research_assistant.models import Answer, Citation, ClaimCheck, SecurityEvent, ToolResult
 from research_assistant.rag_trace import CandidateRow, RagTrace, SearchView
+from research_assistant.verification.claims import (
+    badge_positions,
+    borrows_citation,
+    strip_markers,
+    summary_line,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +107,8 @@ STEP_LABELS = {
     "agent": "Plan (agent model)",
     "tools": "Run tools",
     "finalize": "Write answer",
+    "verify": "Verify answer",
+    "verify_claims": "Verifying claims",
     # retrieval stages
     "self_query": "Self-query filters",
     "query_translation": "Query rewrites",
@@ -130,6 +139,38 @@ TOOL_LABELS = {
 }
 
 _LLM_STAGES = {"agent", "self_query", "query_translation", "generate"}
+
+# What the collapsed "Research" step shows while a stage runs. Chainlit's "Using"/"Used"
+# prefix is blanked in .chainlit/translations/en-US.json so these read on their own.
+ROOT_STEP_NAME = "Research"
+PROGRESS_LABELS = {
+    "validate_input": "Validating input…",
+    "detect_injection": "Checking for prompt injection…",
+    "agent": "Planning…",
+    "tools": "Running tools…",
+    "retrieve": "Searching papers…",
+    "rerank": "Reranking results…",
+    "finalize": "Writing answer…",
+    "generate": "Writing answer…",
+    "verify": "Verifying claims…",
+    "verify_claims": "Verifying claims…",
+}
+REVISION_LABEL = "Revising answer…"
+CHECKING_CLAIMS = "_Checking the claims against the cited sources…_"
+
+
+def ensure_files_dir() -> None:
+    """Recreate Chainlit's ``.files`` folder if it is gone: any Chainlit process that shuts
+    down in this folder (e.g. a second ``chainlit run`` that failed to bind the port) deletes
+    it, and then every element send fails."""
+    FILES_DIRECTORY.mkdir(exist_ok=True)
+
+
+def progress_label(step_id: str, name: str) -> str | None:
+    """Label for the root step while ``name`` runs (None: keep the current one)."""
+    if name == "generate" and ":revision" in step_id:
+        return REVISION_LABEL
+    return PROGRESS_LABELS.get(name)
 
 
 def step_type(step_id: str, name: str) -> str:
@@ -228,6 +269,32 @@ def format_step_output(name: str, output: Any, metadata: Mapping[str, Any] | Non
                 f"{out.get('n_sources', 0)} sources, {out.get('n_tool_results', 0)} tool results; "
                 f"cited {len(out.get('citations', []))} sources"
             )
+    elif name == "verify":
+        if out.get("canary_leak"):
+            lines.append("The revised answer was withheld.")
+        elif out.get("status") == "error":
+            lines.append("⚠️ The claim check could not be completed.")
+        else:
+            lines.append(f"Policy: {md(out.get('policy', ''))}")
+            if out.get("summary"):
+                lines.append(md(out["summary"]))
+            if out.get("regenerated"):
+                lines.append("The answer was rewritten once without the unsupported claims.")
+            if out.get("removed"):
+                lines.append(f"Removed {out['removed']} unsupported sentence(s).")
+    elif name == "verify_claims":
+        if out.get("error"):
+            lines.append(f"⚠️ {md(out['error'])}")
+        else:
+            counts = out.get("counts") or {}
+            lines.append(
+                ", ".join(f"{CLAIM_LABELS.get(k, md(k)).lower()}: {v}" for k, v in counts.items())
+                or "No claims to check."
+            )
+            if out.get("fabricated"):
+                lines.append(f"{out['fabricated']} verdict(s) quoted text not in the source.")
+        if meta.get("judge_calls"):
+            lines.append(f"_{meta['judge_calls']} judge call(s)_")
     elif name == "self_query":
         lines.append(f"**Search query:** {md(out.get('semantic_query', ''))}")
         lines.append(f"**Filters:** {_filters_text(out.get('filters'))}")
@@ -442,7 +509,9 @@ class ChainlitSink:
         self.root = root
         self.message = message
         self.files: list[cl.File] = []  # downloads to attach to the final message
-        self.streamed = False  # True once a token reached the message (it exists in the UI)
+        self.streamed = False  # True once the message exists in the UI (token or draft)
+        # Source elements sent with the draft, reused for the final message (by name).
+        self.source_elements: dict[str, cl.Text] = {}
         self._open: list[tuple[str, str, cl.Step]] = []  # (step id, core name, step)
 
     # -- EventSink (called from the worker thread)
@@ -463,6 +532,9 @@ class ChainlitSink:
             self.streamed = True
             self._run(self.message.stream_token(text))
 
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        self._run(self._draft(answer, verifying))
+
     # -- async implementations
 
     @staticmethod
@@ -476,6 +548,10 @@ class ChainlitSink:
         return self._open[-1][2].id if self._open else self.root.id
 
     async def _start(self, step_id: str, name: str) -> None:
+        label = progress_label(step_id, name)
+        if label is not None and label != self.root.name:
+            self.root.name = label
+            await self.root.update()
         step = cl.Step(
             name=step_label(name),
             type=step_type(step_id, name),  # type: ignore[arg-type]
@@ -502,6 +578,23 @@ class ChainlitSink:
                     step.is_error = True
             step.end = utc_now()
             await step.update()
+
+    async def _draft(self, answer: Answer, verifying: bool) -> None:
+        """Show the answer with linked sources while its claims are still being checked."""
+        elements = [source_element(c) for c in answer.citations]
+        self.source_elements = {e.name: e for e in elements}
+        self.message.content = draft_markdown(answer, verifying)
+        self.message.elements = list(elements)
+        ensure_files_dir()
+        if self.streamed:
+            await self.message.update()
+        else:
+            await self.message.send()
+            self.streamed = True
+
+    def reuse_source(self, c: Citation) -> cl.Text:
+        """The draft's element for ``c`` (same id, so no duplicate), else a new one."""
+        return self.source_elements.get(citation_ref_name(c)) or source_element(c)
 
     async def _tool(self, name: str, args: dict[str, Any], result: ToolResult) -> None:
         step = cl.Step(
@@ -567,6 +660,9 @@ class IngestTaskSink:
     def token(self, text: str) -> None:
         pass
 
+    def answer_ready(self, answer: Answer, verifying: bool) -> None:
+        pass
+
     async def finish(self, ok: bool) -> None:
         if not ok:
             for task in self.tasks.values():
@@ -627,13 +723,135 @@ def security_notice(events: Sequence[SecurityEvent], blocked: bool) -> tuple[str
     return None, False
 
 
+# --------------------------------------------------------------------------- claim badges
+
+# One glyph per claim status. The badge after each sentence is a side element named
+# "<glyph> C<n>"; public/claims.js gives these element links the CSS classes
+# claim-badge claim-<status> (public/custom.css), the glyph alone still reads without it.
+CLAIM_GLYPHS = {
+    "supported": "✓",
+    "partially_supported": "◐",
+    "unsupported": "✗",
+    "uncited": "?",
+}
+CLAIM_LABELS = {
+    "supported": "Supported",
+    "partially_supported": "Partially supported",
+    "unsupported": "Unsupported",
+    "uncited": "No citation",
+}
+
+
+def claim_ref_name(check: ClaimCheck) -> str:
+    """Badge / side-element name of a claim, e.g. ``✓ C3``."""
+    return f"{CLAIM_GLYPHS[check.status]} C{check.index}"
+
+
+def _cited_names(check: ClaimCheck, citations: Sequence[Citation]) -> list[str]:
+    by_number = {c.number: c for c in citations}
+    return [md(citation_ref_name(by_number[n])) for n in check.cited if n in by_number]
+
+
+def claim_element(check: ClaimCheck, citations: Sequence[Citation] = ()) -> cl.Text:
+    """Side panel for one claim: verdict, rationale and the cited chunk with the evidence span
+    in bold. All text from the answer and the papers is escaped."""
+    parts = [
+        f"**C{check.index} · {CLAIM_LABELS[check.status]}**",
+        f"> {md(strip_markers(check.sentence), 1500)}",
+    ]
+    if check.status == "uncited":
+        parts.append(
+            "This sentence states a fact, but neither it nor a later sentence of its paragraph "
+            "cites a source, so it was not checked."
+        )
+        return cl.Text(name=claim_ref_name(check), content="\n\n".join(parts), display="side")
+    cited = _cited_names(check, citations)
+    if cited:
+        via = " (via the next cited sentence of the paragraph)" if borrows_citation(check) else ""
+        parts.append(f"**Cites{via}:** " + "; ".join(cited))
+    if check.rationale:
+        parts.append(f"**Judge:** {md(check.rationale, 600)}")
+    if check.note:
+        parts.append(
+            "⚠️ **Fabricated evidence:** the judge quoted text that does not occur in the cited "
+            "source, so the claim counts as unsupported."
+        )
+    if check.evidence_span and check.evidence_source is not None:
+        src = next((c for c in citations if c.number == check.evidence_source), None)
+        where = md(citation_ref_name(src)) if src else f"source {check.evidence_source}"
+        if src and src.section:
+            where += f", section {md(src.section, 200)}"
+        before = md(check.evidence_before)
+        after = md(check.evidence_after)
+        lead = " " if check.evidence_before.endswith(" ") else ""
+        trail = " " if check.evidence_after.startswith(" ") else ""
+        parts.append(f"**Evidence** ({where}):")
+        parts.append(f"> {before}{lead}**{md(check.evidence_span)}**{trail}{after}")
+    return cl.Text(name=claim_ref_name(check), content="\n\n".join(parts), display="side")
+
+
+def _answer_with_badges(result: TurnResult, raw: str) -> str:
+    """The answer with claim badges: after a sentence's own citation, after the next cited
+    sentence of its paragraph when it borrows that citation, or at the paragraph end when
+    nothing cites it (see :func:`badge_positions`). Stale spans get no badge."""
+    positions = badge_positions(raw, result.claim_checks)
+    by_pos: dict[int, list[ClaimCheck]] = {}
+    for c in sorted(result.claim_checks, key=lambda c: c.index):
+        if c.index in positions:
+            by_pos.setdefault(positions[c.index], []).append(c)
+    out: list[str] = []
+    pos = 0
+    for at in sorted(by_pos):
+        out.append(
+            render_with_references(
+                raw[pos:at], result.citations, result.tool_citations, strip=False
+            )
+        )
+        out.append("".join(f" {claim_ref_name(c)}" for c in by_pos[at]))
+        pos = at
+    out.append(
+        render_with_references(raw[pos:], result.citations, result.tool_citations, strip=False)
+    )
+    return "".join(out).strip()
+
+
+def verification_line(result: TurnResult) -> str | None:
+    """One-line summary of the claim check, e.g. "Claim check: 12 of 13 claims supported"."""
+    info = result.verification
+    if info is None or info.policy == "off":
+        return None
+    if info.status == "error":
+        return "_Claim check unavailable for this answer._"
+    if not result.claim_checks:
+        return None
+    line = f"Claim check: {summary_line(result.claim_checks)}"
+    if info.regenerated:
+        line += " · answer revised once"
+    return f"_{md(line)}_"
+
+
+def draft_markdown(answer: Answer, verifying: bool) -> str:
+    """The answer before claim verification, references named like the source elements."""
+    text = render_with_references(
+        answer.raw_text or answer.text, answer.citations, answer.tool_citations
+    )
+    return f"{text}\n\n{CHECKING_CLAIMS}" if verifying else text
+
+
 def answer_markdown(result: TurnResult) -> str:
-    """Final message text: references named like the source elements, plus security notes."""
+    """Final message text: references named like the source elements, a badge per checked
+    sentence, the claim-check summary and security notes."""
     notice, replaces = security_notice(result.security_events, result.blocked)
     if notice is not None and replaces:
         return notice
     raw = result.raw_answer or result.answer
-    text = render_with_references(raw, result.citations, result.tool_citations)
+    if result.claim_checks and result.raw_answer:
+        text = _answer_with_badges(result, raw)
+    else:
+        text = render_with_references(raw, result.citations, result.tool_citations)
+    line = verification_line(result)
+    if line:
+        text = f"{text}\n\n{line}"
     if notice is not None:
         text = f"> {notice}\n\n{text}"
     return text

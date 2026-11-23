@@ -10,7 +10,14 @@ from chainlit.context import init_http_context
 
 from research_assistant.agent.state import TurnResult
 from research_assistant.app_guide import GuideAnswer, HelpSection
-from research_assistant.models import Citation, SecurityEvent, ToolResult
+from research_assistant.models import (
+    Answer,
+    Citation,
+    ClaimCheck,
+    SecurityEvent,
+    ToolResult,
+    VerificationInfo,
+)
 from research_assistant.rag_trace import (
     CandidateRow,
     RagTrace,
@@ -432,3 +439,158 @@ async def test_help_element_is_named_like_the_reference(chainlit_context: None) 
     ans = GuideAnswer(question="q", text="Use export (Help: Export).", cited=[sec])
     el = render.help_element(ans.cited[0])
     assert el.name == "Help: Export" and el.name in ans.text
+
+
+# --------------------------------------------------------------------------- claim badges
+
+
+def _claims_turn() -> TurnResult:
+    raw = (
+        "## LiRA\n- Shadow models are used [1].\n- The *attack* fails [1].\n\n"
+        "Uncited fact here today."
+    )
+    s1 = raw.index("Shadow")
+    s2 = raw.index("The *attack*")
+    s3 = raw.index("Uncited")
+    checks = [
+        ClaimCheck(
+            index=1,
+            sentence="Shadow models are used [1].",
+            start=s1,
+            end=s1 + 27,
+            cited=[1],
+            status="supported",
+            judge_label="supported",
+            evidence_span="We use shadow models.",
+            evidence_source=1,
+            evidence_before="In this work ",
+            evidence_after=" They mimic *the* target.",
+            rationale="Stated directly.",
+        ),
+        ClaimCheck(
+            index=2,
+            sentence="The *attack* fails [1].",
+            start=s2,
+            end=s2 + 23,
+            cited=[1],
+            status="unsupported",
+            judge_label="supported",
+            evidence_span="It fails <img src=x>",
+            rationale="Quote not in source.",
+            note="fabricated evidence",
+        ),
+        ClaimCheck(
+            index=3,
+            sentence="Uncited fact here today.",
+            start=s3,
+            end=s3 + 24,
+            status="uncited",
+        ),
+    ]
+    info = VerificationInfo(policy="flag", status="ok", n_judge_calls=1)
+    return turn(
+        raw_answer=raw,
+        citations=[cite()],
+        claim_checks=checks,
+        supported_rate=1 / 3,
+        verification=info,
+    )
+
+
+def test_answer_markdown_adds_claim_badges_and_summary() -> None:
+    out = render.answer_markdown(_claims_turn())
+    assert out == (
+        "## LiRA\n"
+        "- Shadow models are used ([1] Shokri et al. 2017). ✓ C1\n"
+        "- The *attack* fails ([1] Shokri et al. 2017). ✗ C2\n\n"
+        "Uncited fact here today. ? C3\n\n"
+        "_Claim check: 1 of 3 claims supported (1 unsupported, 1 without citation)_"
+    )
+
+
+def test_stale_claim_span_gets_no_badge() -> None:
+    res = _claims_turn()
+    bad = res.claim_checks[0].model_copy(update={"start": 0, "end": 5})
+    res = res.model_copy(update={"claim_checks": [bad, *res.claim_checks[1:]]})
+    out = render.answer_markdown(res)
+    assert "✓ C1" not in out and "✗ C2" in out
+
+
+def test_verification_error_line() -> None:
+    info = VerificationInfo(policy="flag", status="error", error="x")
+    res = turn(raw_answer="A [1].", citations=[cite()], verification=info)
+    assert render.answer_markdown(res).endswith("_Claim check unavailable for this answer._")
+    off = turn(raw_answer="A [1].", citations=[cite()])
+    assert "Claim check" not in render.answer_markdown(off)
+
+
+async def test_claim_elements_highlight_evidence_and_escape(chainlit_context: None) -> None:
+    res = _claims_turn()
+    supported, fabricated, uncited = (
+        render.claim_element(c, res.citations) for c in res.claim_checks
+    )
+    assert supported.name == "✓ C1" and supported.display == "side"
+    assert "**C1 · Supported**" in supported.content
+    assert "In this work **We use shadow models.** They mimic \\*the\\* target." in (
+        supported.content
+    )
+    assert "[1] Shokri et al. 2017" in supported.content.replace("\\[", "[").replace("\\]", "]")
+    assert fabricated.name == "✗ C2" and "Fabricated evidence" in fabricated.content
+    assert "<img" not in fabricated.content.replace("\\<img", "")
+    assert uncited.name == "? C3" and "cites a source, so it was not checked" in uncited.content
+
+
+def test_verify_step_output() -> None:
+    out = render.format_step_output(
+        "verify_claims",
+        {"counts": {"supported": 2, "unsupported": 1}, "fabricated": 1},
+        {"judge_calls": 1, "latency_ms": 900},
+    )
+    assert "supported: 2" in out and "1 verdict(s) quoted text" in out
+    assert render.step_label("verify_claims") == "Verifying claims"
+    out = render.format_step_output(
+        "verify", {"policy": "regenerate", "status": "ok", "summary": "1 of 1", "regenerated": True}
+    )
+    assert "rewritten once" in out
+
+
+async def test_borrowed_and_uncited_badges_are_grouped(chainlit_context: None) -> None:
+    raw = "Shadow models mimic the target. They use similar data [1]. One query is enough."
+    s2 = raw.index("They")
+    s3 = raw.index("One")
+    checks = [
+        ClaimCheck(index=1, sentence="Shadow models mimic the target.", start=0, end=31,
+                   cited=[1], status="supported"),
+        ClaimCheck(index=2, sentence="They use similar data [1].", start=s2, end=s2 + 26,
+                   cited=[1], status="partially_supported"),
+        ClaimCheck(index=3, sentence="One query is enough.", start=s3, end=s3 + 20,
+                   status="uncited"),
+    ]  # fmt: skip
+    info = VerificationInfo(policy="flag", status="ok", n_judge_calls=1)
+    res = turn(raw_answer=raw, citations=[cite()], claim_checks=checks, verification=info)
+    out = render.answer_markdown(res).split("\n\n")[0]
+    assert out == (
+        "Shadow models mimic the target. They use similar data ([1] Shokri et al. 2017). "
+        "✓ C1 ◐ C2 One query is enough. ? C3"
+    )
+    panel = render.claim_element(checks[0], [cite()]).content
+    assert "Cites (via the next cited sentence of the paragraph)" in panel
+
+
+def test_progress_labels_for_the_research_step() -> None:
+    assert render.progress_label("agent:t:validate_input:1", "validate_input") == (
+        "Validating input…"
+    )
+    assert render.progress_label("verify:t", "verify_claims") == "Verifying claims…"
+    assert render.progress_label("generation:hybrid:revision:generate", "generate") == (
+        "Revising answer…"
+    )
+    assert render.progress_label("retrieval:x:fuse", "fuse") is None
+
+
+def test_draft_markdown_links_sources_and_says_claims_are_checked() -> None:
+    ans = Answer(question="q", text="x", raw_text="Shadow models [1].", citations=[cite()])
+    out = render.draft_markdown(ans, verifying=True)
+    assert out.startswith("Shadow models ([1] Shokri et al. 2017).")
+    assert out.endswith(render.CHECKING_CLAIMS)
+    assert render.draft_markdown(ans, verifying=False) == "Shadow models ([1] Shokri et al. 2017)."

@@ -106,9 +106,25 @@ What is checked automatically for every answer:
 - **Grounding rules in the prompt.** The model is instructed to answer only from the sources, not
   to invent numbers, to distinguish formal guarantees from empirical results and to say which part
   of a question the sources do not cover.
-What is not checked automatically: whether a cited passage really supports the sentence, and
-whether every factual sentence carries a citation. Use the side panel and the "unused sources"
-list to check claims yourself.
+- **Claim check.** After the answer is written, a separate judge model (temperature 0) checks
+  every cited sentence against the chunks it cites and quotes the passage that supports it. If
+  the quoted passage does not occur in the cited chunk, the claim counts as unsupported
+  ("fabricated evidence"). Factual sentences without a citation are marked as uncited. This runs
+  in the "Verifying claims" step.
+
+## Claim badges
+The sources are linked as soon as the answer is written; the claim check runs after that.
+Each checked sentence gets a badge: ✓ supported, ◐ partially supported (a number,
+condition or detail is missing or overstated), ✗ unsupported, ? no citation. A sentence without
+its own citation is checked against the next citation in its paragraph, and its badge sits
+after that citation; a sentence that nothing in its paragraph cites gets its "?" badge at the
+end of the paragraph. Click a badge to
+open the claim in the side panel: the judge's one-sentence reason and the cited chunk with the
+supporting passage in bold. A line under the answer sums up the check, e.g. "Claim check: 12 of
+13 claims supported". What happens to unsupported claims depends on the verification policy in
+config/settings.yaml: flag (default) only marks them, remove deletes those sentences and says so,
+regenerate rewrites the answer once without them. The judge is a model too and can be wrong;
+the badges are a guide for checking, not a guarantee.
 
 ## Tools
 The agent decides which tools to call (at most 6 tool calls per turn):
@@ -164,5 +180,7 @@ are not, and the agent's memory of earlier turns is lost if the server was resta
 - Citation labels use the arXiv year, not the venue year.
 - The source excerpt in the side panel is the start of the chunk, not necessarily the exact
   sentence the answer relies on.
-- Verification does not check that a cited passage supports the claim (see "Verification").
+- The claim check judges each sentence only against the chunks it cites, and sentences that cite
+  only tool results ([T1]) are not checked. Deciding which uncited sentences state facts is a
+  heuristic.
 - The App Guide only knows this page.

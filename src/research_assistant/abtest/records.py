@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from research_assistant.abtest.gold import QuestionType, Split
-from research_assistant.models import TokenUsage
+from research_assistant.models import ClaimCheck, TokenUsage, VerificationPolicy
 
 
 class RetrievedChunk(BaseModel):
@@ -45,11 +45,18 @@ class JudgeResult(BaseModel):
         return self.error is None
 
 
+def arm_name(strategy: str, verification: str) -> str:
+    """Experiment arm: the strategy alone without verification, else ``strategy+mode``."""
+    return strategy if verification == "off" else f"{strategy}+{verification}"
+
+
 class EvalRecord(BaseModel):
-    """Everything the metrics need about one (strategy, question) turn."""
+    """Everything the metrics need about one (strategy, verification mode, question) turn."""
 
     run_id: str
     strategy: str
+    # Claim verification policy of the turn ("off" for records of older runs).
+    verification: VerificationPolicy = "off"
     question_id: str
     question_type: QuestionType
     split: Split | None
@@ -67,11 +74,23 @@ class EvalRecord(BaseModel):
     latency_ms: float = 0.0
     event_counts: dict[str, int] = Field(default_factory=dict)
     judge: JudgeResult | None = None
+    # Source number -> chunk id of every chunk given to the answer generator (lets the
+    # claims of an unverified answer be checked after the turn).
+    sources: dict[int, str] = Field(default_factory=dict)
+    # Claim check: by the agent (flag / remove / regenerate) or, for "off", after the turn.
+    claim_checks: list[ClaimCheck] = Field(default_factory=list)
+    supported_rate: float | None = None
+    claims_checked: bool = False
+    claim_error: str | None = None
     created_at: str
 
     @property
-    def key(self) -> tuple[str, str]:
-        return (self.strategy, self.question_id)
+    def key(self) -> tuple[str, str, str]:
+        return (self.strategy, self.verification, self.question_id)
+
+    @property
+    def arm(self) -> str:
+        return arm_name(self.strategy, self.verification)
 
     def retrieved_arxiv_ids(self) -> list[str]:
         """Paper of every retrieved chunk, searches in call order, ranks within a search.
@@ -95,4 +114,5 @@ __all__ = [
     "RefusalJudgment",
     "RetrievedChunk",
     "SearchRecord",
+    "arm_name",
 ]

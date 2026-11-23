@@ -258,6 +258,12 @@ def stage_latencies(turn: TurnResult) -> list[StageLatency]:
     )
     add("other_tools", "Other tools + overhead", "tools", max(0.0, other))
     add("generate", "Answer generation (LLM)", "generation", turn.generation_latency_ms)
+    add(
+        "verify",
+        "Claim verification (judge, regeneration)",
+        "generation",
+        node_ms.get("verify", 0.0),
+    )
     return out
 
 

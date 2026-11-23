@@ -305,12 +305,14 @@ def render_with_references(
     raw_text: str,
     citations: Sequence[Citation],
     tool_citations: Sequence[ToolCitation] = (),
+    strip: bool = True,
 ) -> str:
     """Render :attr:`Answer.raw_text` with each marker run as ``([1] Shokri et al. 2017; ...)``.
 
     Uses :func:`citation_ref_name`, so a UI can attach one element per citation under that
     name. Tool markers become ``(dp_accountant [T1])``. Markers without a citation are
-    dropped (raw_text only holds validated markers, so this is defensive).
+    dropped (raw_text only holds validated markers, so this is defensive). ``strip=False``
+    keeps surrounding whitespace (for rendering an answer piece by piece).
     """
     by_number = {c.number: c for c in citations}
     tools = {t.number: t for t in tool_citations}
@@ -336,7 +338,8 @@ def render_with_references(
             pre = " "
         return pre + "(" + "; ".join(f"{tools[n].name} [T{n}]" for n in seen) + ")"
 
-    return _TOOL_RUN.sub(_tools, _RUN.sub(_sources, raw_text)).strip()
+    out = _TOOL_RUN.sub(_tools, _RUN.sub(_sources, raw_text))
+    return out.strip() if strip else out
 
 
 # --------------------------------------------------------------------------- dependencies
@@ -396,12 +399,18 @@ def generate_answer(
     retrieval: RetrievalTrace | None = None,
     strategy: str | None = None,
     max_tool_chars: int = 6000,
+    revision: Sequence[str] = (),
+    step_prefix: str | None = None,
 ) -> Answer:
     """Write a cited answer from already collected ``chunks`` and ``tool_results``.
 
     Chunks become numbered sources ``[n]``, tool results spotlighted blocks ``[Tn]``.
     Without either, the no-sources message is returned and the LLM is not called. Raises
     :class:`GenerationError` (user-safe message) if the LLM fails.
+
+    ``revision`` (claim verification) lists unsupported sentences of a previous draft that
+    the model must drop or correct; ``step_prefix`` replaces the default step-id prefix
+    ``generation:<strategy>`` so a second generation in one turn gets its own steps.
     """
     t0 = time.perf_counter()
     sink = sink or NullSink()
@@ -434,9 +443,11 @@ def generate_answer(
         history=history,
         extra_system=extra_system,
         max_tool_chars=max_tool_chars,
+        revision=revision,
     )
 
-    step_id = f"generation:{name}:generate"
+    prefix = step_prefix or f"generation:{name}"
+    step_id = f"{prefix}:generate"
     sink.step_started(
         step_id,
         "generate",
@@ -445,6 +456,7 @@ def generate_answer(
             "n_tool_results": len(tool_results),
             "model": deps.model_name,
             "datamarking": cfg.datamarking,
+            **({"revision": len(revision)} if revision else {}),
         },
     )
     g0 = time.perf_counter()
@@ -466,7 +478,7 @@ def generate_answer(
         },
     )
 
-    cite_id = f"generation:{name}:cite"
+    cite_id = f"{prefix}:cite"
     sink.step_started(cite_id, "cite", {"n_sources": len(sources)})
     parsed = parse_citations(streamed.text, sources, cfg.excerpt_chars, tool_results)
     cite_out: dict[str, Any] = {

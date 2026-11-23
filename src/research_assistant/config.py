@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import (
@@ -170,6 +171,20 @@ class AgentConfig(BaseModel):
     max_tool_result_chars: int = Field(default=6000, gt=0)
 
 
+class VerificationConfig(BaseModel):
+    """Claim verification after answer generation (see research_assistant.verification)."""
+
+    # off: no check; flag: mark claims only; remove: drop unsupported sentences and say so;
+    # regenerate: one retry with the list of unsupported claims (then flag what remains).
+    policy: Literal["off", "flag", "remove", "regenerate"] = "flag"
+    # Claims per judge call (one structured call per batch).
+    batch_size: int = Field(default=10, ge=1, le=25)
+    # Characters of chunk text kept on each side of an evidence span (UI highlighting).
+    context_chars: int = Field(default=300, ge=0, le=2000)
+    # Characters of one cited chunk shown to the judge.
+    max_chunk_chars: int = Field(default=6000, gt=0)
+
+
 class InjectionConfig(BaseModel):
     """Prompt-injection detection on user input."""
 
@@ -226,6 +241,7 @@ class Settings(BaseSettings):
     semantic_scholar: SemanticScholarConfig = SemanticScholarConfig()
     generation: GenerationConfig = GenerationConfig()
     agent: AgentConfig = AgentConfig()
+    verification: VerificationConfig = VerificationConfig()
     security: SecurityConfig = SecurityConfig()
     logging: LoggingConfig = LoggingConfig()
 
