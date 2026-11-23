@@ -37,7 +37,23 @@ class LLMCallError(RuntimeError):
     """An LLM call failed after retries. The message never contains secrets or prompts."""
 
 
-def _build(model: str, settings: Settings) -> ChatOpenAI:
+# Request-level ``cache_control`` turns on Anthropic's automatic prompt caching: the
+# breakpoint moves to the last cacheable block, so each agent step reads everything the
+# previous step already sent (system prompt, question, earlier tool results) from the cache.
+# Per-block breakpoints would not work here: LangChain drops ``cache_control`` from tool
+# messages, and the system prompt alone is below Anthropic's minimum cacheable length.
+# Only the tool-calling agent loop resends its prefix; single-shot calls (answer generation,
+# structured judge calls) would pay the 1.25x cache-write price without ever reading it back,
+# so they are built without caching.
+PROMPT_CACHE_PREFIXES = ("anthropic/",)
+_AUTO_CACHE = {"cache_control": {"type": "ephemeral"}}
+
+
+def uses_prompt_cache(model: str, settings: Settings) -> bool:
+    return settings.llm.prompt_cache and model.startswith(PROMPT_CACHE_PREFIXES)
+
+
+def _build(model: str, settings: Settings, *, cache: bool = False) -> ChatOpenAI:
     key = settings.openrouter_api_key
     if key is None or not key.get_secret_value():
         raise LLMConfigError("OPENROUTER_API_KEY is not set. Add it to your .env file.")
@@ -48,6 +64,8 @@ def _build(model: str, settings: Settings) -> ChatOpenAI:
         timeout=settings.llm.timeout_s,
         max_retries=settings.llm.max_retries,
         temperature=settings.llm.temperature,
+        max_tokens=settings.llm.max_tokens,
+        extra_body=dict(_AUTO_CACHE) if cache and uses_prompt_cache(model, settings) else None,
         stream_usage=True,
     )
 
@@ -96,10 +114,13 @@ _RETRYABLE = (
 def usage_from_message(message: Any) -> TokenUsage:
     """Token usage reported on an AIMessage (zeros if the provider sent none)."""
     meta = getattr(message, "usage_metadata", None) or {}
+    details = meta.get("input_token_details") or {}
     return TokenUsage(
         input_tokens=int(meta.get("input_tokens") or 0),
         output_tokens=int(meta.get("output_tokens") or 0),
         total_tokens=int(meta.get("total_tokens") or 0),
+        cache_read_tokens=int(details.get("cache_read") or 0),
+        cache_write_tokens=int(details.get("cache_creation") or 0),
     )
 
 
@@ -215,12 +236,14 @@ def get_tool_calling_llm(
     """The ``role`` model, or ``model`` if given (with fallback model), bound to ``tools``."""
     settings = settings or get_settings()
     model_name = model or getattr(settings.models, role)
-    primary: Runnable[LanguageModelInput, BaseMessage] = _build(model_name, settings).bind_tools(
-        list(tools)
-    )
+    primary: Runnable[LanguageModelInput, BaseMessage] = _build(
+        model_name, settings, cache=True
+    ).bind_tools(list(tools))
     fallback_name = settings.models.fallback
     if fallback_name != model_name:
-        primary = primary.with_fallbacks([_build(fallback_name, settings).bind_tools(list(tools))])
+        primary = primary.with_fallbacks(
+            [_build(fallback_name, settings, cache=True).bind_tools(list(tools))]
+        )
     return ChatToolCallingLLM(primary, max_attempts=settings.llm.max_retries, model_name=model_name)
 
 

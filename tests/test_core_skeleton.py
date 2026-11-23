@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableWithFallbacks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr, ValidationError
 
 from research_assistant.config import SETTINGS_YAML, Settings
 from research_assistant.events import EventSink, NullSink, RecordingSink
-from research_assistant.llm import LLMConfigError, get_chat_model
+from research_assistant.llm import (
+    LLMConfigError,
+    get_chat_model,
+    get_tool_calling_llm,
+    usage_from_message,
+)
 from research_assistant.models import Chunk
 
 
@@ -41,6 +47,55 @@ def test_get_chat_model_uses_openrouter_with_fallback(settings: Settings, role: 
     assert str(primary.openai_api_base) == settings.llm.base_url
     assert primary.request_timeout == settings.llm.timeout_s
     assert primary.max_retries == settings.llm.max_retries
+
+
+def _agent_llm(settings: Settings, model: str) -> ChatOpenAI:
+    llm = get_tool_calling_llm("main", [], settings, model=model)._model
+    assert isinstance(llm, RunnableWithFallbacks)
+    bound = llm.runnable.bound  # type: ignore[attr-defined]
+    assert isinstance(bound, ChatOpenAI)
+    return bound
+
+
+def test_only_the_anthropic_agent_loop_uses_prompt_caching(settings: Settings) -> None:
+    assert _agent_llm(settings, "anthropic/some-model").extra_body == {
+        "cache_control": {"type": "ephemeral"}
+    }
+    assert not _agent_llm(settings, "openai/some-model").extra_body
+    # Single-shot calls never reuse a prefix, so caching would only add write cost.
+    single = get_chat_model("main", settings, model="anthropic/some-model")
+    assert isinstance(single, RunnableWithFallbacks)
+    assert not single.runnable.extra_body  # type: ignore[attr-defined]
+
+
+def test_prompt_cache_can_be_switched_off(settings: Settings) -> None:
+    off = settings.model_copy(
+        update={"llm": settings.llm.model_copy(update={"prompt_cache": False})}
+    )
+    assert not _agent_llm(off, "anthropic/some-model").extra_body
+
+
+def test_every_model_gets_the_output_token_cap(settings: Settings) -> None:
+    single = get_chat_model("main", settings, model="openai/some-model")
+    assert isinstance(single, RunnableWithFallbacks)
+    for llm in (single.runnable, _agent_llm(settings, "anthropic/some-model")):
+        assert llm.max_tokens == settings.llm.max_tokens  # type: ignore[attr-defined]
+
+
+def test_usage_includes_cache_tokens() -> None:
+    msg = AIMessage(
+        content="x",
+        usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 5,
+            "total_tokens": 105,
+            "input_token_details": {"cache_read": 80, "cache_creation": 15},
+        },
+    )
+    usage = usage_from_message(msg)
+    assert (usage.cache_read_tokens, usage.cache_write_tokens) == (80, 15)
+    total = usage + usage
+    assert (total.cache_read_tokens, total.cache_write_tokens) == (160, 30)
 
 
 def test_get_chat_model_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:

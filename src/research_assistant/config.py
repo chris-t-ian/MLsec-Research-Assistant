@@ -38,6 +38,18 @@ class LLMConfig(BaseModel):
     timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(
+        default=8192,
+        gt=0,
+        description="Output cap per call. OpenRouter reserves credit for this many output "
+        "tokens before each request, so an unset cap (provider maximum) blocks calls on a "
+        "low balance.",
+    )
+    prompt_cache: bool = Field(
+        default=True,
+        description="Ask Anthropic models for automatic prompt caching: repeated prompt "
+        "prefixes (system prompt, earlier tool results) are billed at the cache-read rate.",
+    )
 
 
 class PathsConfig(BaseModel):
