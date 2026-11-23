@@ -35,7 +35,10 @@ By default every strategy fetches 30 candidates per ranked list and returns 8 ch
 2 chunks per paper (so more different papers make it in).
 - **baseline_dense**: dense (embedding) search only. Fast; good for paraphrased or conceptual
   questions, weaker on exact terms, acronyms and paper names.
-- **hybrid** (default): dense search plus BM25 keyword search, fused with RRF. A good all-round
+- **baseline_dense_tuned** (default): **baseline_dense** returning 12 chunks per search instead
+  of 8. Tuned on the evaluation questions, where it found clearly more of the relevant papers;
+  fast, at the cost of a longer prompt.
+- **hybrid**: dense search plus BM25 keyword search, fused with RRF. A good all-round
   choice; BM25 catches exact terms such as "LiRA", "RDP" or an author name.
 - **hybrid_multiquery**: an LLM writes 3 paraphrases of the question; every paraphrase is searched
   with dense and BM25 and all lists are fused. Better recall for vague or unusually worded

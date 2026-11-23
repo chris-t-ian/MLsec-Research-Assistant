@@ -84,7 +84,7 @@ generation:
 agent:
   # Strategy name from config/strategies.yaml used by search_knowledge_base (rerank
   # strategies are slow on CPU, see retrieval.reranker_model).
-  default_strategy: hybrid
+  default_strategy: baseline_dense_tuned  # dense, top_k 12, max 2 chunks per paper
   history_turns: 6            # completed earlier turns passed to the model
   max_tool_calls_per_turn: 6  # hard cap (validated <= 6)
   max_agent_steps: 6          # agent model calls per turn

@@ -19,6 +19,16 @@ strategies:
     retriever: dense
     rerank: false
 
+  # baseline_dense with the parameters tuned on dev (eval/results/tuning-20261123-102932:
+  # 0.46 -> 0.62 gold papers found). Not checked on the test split. App default
+  # (agent.default_strategy); baseline_dense itself stays unchanged as the eval reference.
+  - name: baseline_dense_tuned
+    query_translation: none
+    use_filters: false
+    retriever: dense
+    rerank: false
+    top_k: 12
+
   - name: hybrid
     query_translation: none
     use_filters: false

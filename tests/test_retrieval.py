@@ -363,12 +363,18 @@ def test_load_project_strategies() -> None:
     strategies = load_strategies(PROJECT_ROOT / "config" / "strategies.yaml")
     assert list(strategies) == [
         "baseline_dense",
+        "baseline_dense_tuned",
         "hybrid",
         "hybrid_multiquery",
         "hybrid_hyde_rerank",
         "full",
         "full_tuned",
     ]
+    dense_tuned = strategies["baseline_dense_tuned"]
+    assert dense_tuned.top_k == 12
+    assert dense_tuned.model_dump(exclude={"name", "top_k"}) == strategies[
+        "baseline_dense"
+    ].model_dump(exclude={"name", "top_k"})
     tuned = strategies["full_tuned"]
     assert (tuned.top_k, tuned.rerank_k) == (12, 30)
     assert tuned.model_dump(
@@ -394,7 +400,7 @@ def test_load_project_strategies() -> None:
     assert strategies["hybrid_hyde_rerank"].query_translation == "hyde"
     # `defaults` apply to every strategy that does not override them (full_tuned does, above)
     assert all(s.max_chunks_per_paper == 2 for s in strategies.values())
-    untuned = [s for name, s in strategies.items() if name != "full_tuned"]
+    untuned = [s for name, s in strategies.items() if not name.endswith("_tuned")]
     assert all(s.rerank_k == 15 for s in untuned)
 
 
