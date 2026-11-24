@@ -703,6 +703,10 @@ INJECTION_WARNED = (
     "**Note:** part of your message looked like an instruction aimed at the assistant rather "
     "than a research question. I ignored that part and only answered the research question."
 )
+OUTPUT_FILTERED = (
+    "**Note:** links or images to sites outside arxiv.org, semanticscholar.org and doi.org "
+    "were removed from this answer."
+)
 
 
 def security_notice(events: Sequence[SecurityEvent], blocked: bool) -> tuple[str | None, bool]:
@@ -718,9 +722,12 @@ def security_notice(events: Sequence[SecurityEvent], blocked: bool) -> tuple[str
         if "injection_block" in kinds:
             return INJECTION_BLOCKED, True
         return OUTPUT_WITHHELD, True
+    notes = []
     if "injection_warn" in kinds:
-        return INJECTION_WARNED, False
-    return None, False
+        notes.append(INJECTION_WARNED)
+    if "output_filtered" in kinds:
+        notes.append(OUTPUT_FILTERED)
+    return ("\n>\n> ".join(notes) if notes else None), False
 
 
 # --------------------------------------------------------------------------- claim badges

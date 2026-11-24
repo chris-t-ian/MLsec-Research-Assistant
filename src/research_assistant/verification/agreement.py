@@ -4,6 +4,11 @@ the judge's accuracy and Cohen's kappa against them (used by ``eval/label_claims
 Only cited claims the judge labelled are sampled (uncited sentences get no verdict). The judge
 is compared twice: with its raw label and with the final status after the evidence check
 (fabricated evidence -> unsupported).
+
+Flag precision / recall treat the claim check as a detector of bad claims: a claim is
+*flagged* when the judge does not label it supported (the UI shows ◐ or ✗), and it is *bad*
+when the human label is not supported (partial counts as not supported, as in the
+supported-claim rate). Precision = flagged and bad / flagged; recall = flagged and bad / bad.
 """
 
 from __future__ import annotations
@@ -128,6 +133,10 @@ class Agreement(BaseModel):
     kappa: float | None
     # confusion[human][judge] = count
     confusion: dict[str, dict[str, int]]
+    flag_precision: float | None = None
+    flag_recall: float | None = None
+    n_flagged: int = 0
+    n_bad: int = 0
 
 
 def agreement(
@@ -138,12 +147,20 @@ def agreement(
     confusion = {h: dict.fromkeys(LABELS, 0) for h in LABELS}
     for h, j in zip(human, judge, strict=True):
         confusion[h][j] += 1
+    flagged = [j != "supported" for j in judge]
+    bad = [h != "supported" for h in human]
+    hits = sum(f and b for f, b in zip(flagged, bad, strict=True))
+    n_flagged, n_bad = sum(flagged), sum(bad)
     return Agreement(
         name=name or which,
         n=len(labels),
         accuracy=accuracy(human, judge),
         kappa=cohens_kappa(human, judge),
         confusion=confusion,
+        flag_precision=hits / n_flagged if n_flagged else None,
+        flag_recall=hits / n_bad if n_bad else None,
+        n_flagged=n_flagged,
+        n_bad=n_bad,
     )
 
 
@@ -168,6 +185,18 @@ def render_agreement(results: Sequence[Agreement], run_dir: str, judge_model: st
     ]
     for r in results:
         lines.append(f"| {r.name} | {r.n} | {_fmt(r.accuracy)} | {_fmt(r.kappa)} |")
+    lines += [
+        "",
+        "## Flags (judge: not supported) vs. hand labels (not supported)",
+        "",
+        "| Judge label | Flagged | Bad (human) | Flag precision | Flag recall |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for r in results:
+        lines.append(
+            f"| {r.name} | {r.n_flagged} | {r.n_bad} | {_fmt(r.flag_precision)} "
+            f"| {_fmt(r.flag_recall)} |"
+        )
     for r in results:
         lines += [
             "",

@@ -396,6 +396,7 @@ SecurityEventKind = Literal[
     "canary_leak",  # the session canary appeared in model output or tool arguments
     "tool_denied",  # the tool policy refused a tool call
     "tool_limit",  # the per-turn tool-call limit was reached
+    "output_filtered",  # external links/images to non-allowlisted hosts removed from output
 ]
 
 

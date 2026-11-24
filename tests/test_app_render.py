@@ -594,3 +594,15 @@ def test_draft_markdown_links_sources_and_says_claims_are_checked() -> None:
     assert out.startswith("Shadow models ([1] Shokri et al. 2017).")
     assert out.endswith(render.CHECKING_CLAIMS)
     assert render.draft_markdown(ans, verifying=False) == "Shadow models ([1] Shokri et al. 2017)."
+
+
+def test_security_notice_mentions_removed_links() -> None:
+    filtered = SecurityEvent(kind="output_filtered", detail="removed")
+    warned = SecurityEvent(kind="injection_warn", detail="warn", score=0.5)
+
+    text, replaces = render.security_notice([filtered], blocked=False)
+    assert text == render.OUTPUT_FILTERED and not replaces
+
+    both, replaces = render.security_notice([warned, filtered], blocked=False)
+    assert both is not None and render.INJECTION_WARNED in both
+    assert render.OUTPUT_FILTERED in both and not replaces

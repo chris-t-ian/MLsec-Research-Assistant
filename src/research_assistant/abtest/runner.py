@@ -43,7 +43,7 @@ from research_assistant.agent.state import SessionState, TurnResult
 from research_assistant.config import PROJECT_ROOT, Settings
 from research_assistant.events import EventSink, NullSink, RecordingSink
 from research_assistant.generation.answer import LLM_FAILED_MESSAGE, make_sources
-from research_assistant.llm import ChatStructuredLLM, LLMConfigError, get_chat_model
+from research_assistant.llm import ChatStructuredLLM, LLMConfigError, StructuredLLM, get_chat_model
 from research_assistant.models import ClaimCheck, VerificationPolicy
 from research_assistant.verification.verifier import VerificationError, verify_claims
 
@@ -83,6 +83,8 @@ class RunManifest(BaseModel):
     question_ids: list[str]
     main_model: str
     judge_model: str
+    # Independent claim judge (models.eval_judge): re-checks the final answer of every arm.
+    independent_judge_model: str | None = None
     temperature: float
     k: int
     seed: int
@@ -284,6 +286,7 @@ def run_eval(
     progress: EventSink | None = None,
     max_consecutive_failures: int = MAX_CONSECUTIVE_FAILURES,
     measure: MeasureFn | None = None,
+    independent: MeasureFn | None = None,
 ) -> RunOutcome:
     """Run all missing (strategy, mode, question) turns, questions outer / arms inner so that
     partial runs stay paired. Cached turns are skipped; cached records whose judging failed
@@ -291,6 +294,9 @@ def run_eval(
 
     ``measure`` checks the claims of answers produced without verification (mode "off") for
     in-scope questions; cached "off" records without a claim check are checked on resume.
+    ``independent`` (with ``manifest.independent_judge_model``) checks the final answer of
+    every arm with a judge that is not the agent's verifier, so verification modes are
+    compared on a judge they were not optimized against.
 
     Raises EvalRunError after ``max_consecutive_failures`` failed turns in a row (API down,
     out of credits); everything finished so far stays in the store for ``--resume``."""
@@ -327,6 +333,34 @@ def run_eval(
             }
         )
 
+    def needs_independent(rec: EvalRecord, q: GoldQuestion) -> bool:
+        return (
+            independent is not None
+            and manifest.independent_judge_model is not None
+            and q.in_scope
+            and bool(rec.sources)
+            and rec.independent_judge != manifest.independent_judge_model
+        )
+
+    def independently_measured(rec: EvalRecord) -> EvalRecord:
+        assert independent is not None
+        m = independent(rec)
+        return rec.model_copy(
+            update={
+                "independent_judge": manifest.independent_judge_model,
+                "independent_checks": m.checks,
+                "independent_rate": m.supported_rate,
+                "independent_error": m.error,
+            }
+        )
+
+    def complete(rec: EvalRecord, q: GoldQuestion) -> EvalRecord:
+        if needs_measure(rec, q):
+            rec = measured(rec)
+        if needs_independent(rec, q):
+            rec = independently_measured(rec)
+        return rec
+
     for qid in manifest.question_ids:
         q = by_id[qid]
         for strategy, mode in arms:
@@ -338,15 +372,14 @@ def run_eval(
                 cached = None
             if cached is not None:
                 judged = cached.judge is not None and cached.judge.ok
-                if judged and not needs_measure(cached, q):
+                if judged and not needs_measure(cached, q) and not needs_independent(cached, q):
                     outcome.records.append(cached)
                     continue
                 progress.step_started(step, f"[{i}/{total}] judge {arm} q{qid}", q.question)
                 rec = cached
                 if not judged:
                     rec = rec.model_copy(update={"judge": judge.judge(q, rec.answer)})
-                if needs_measure(rec, q):
-                    rec = measured(rec)
+                rec = complete(rec, q)
                 store.append(rec)
                 outcome.records.append(rec)
                 outcome.n_rejudged += 1
@@ -375,8 +408,7 @@ def run_eval(
             consecutive_failures = 0
             rec = to_record(result, q, strategy, manifest.run_id, sink, mode)
             rec = rec.model_copy(update={"judge": judge.judge(q, rec.answer)})
-            if needs_measure(rec, q):
-                rec = measured(rec)
+            rec = complete(rec, q)
             store.append(rec)
             outcome.records.append(rec)
             outcome.n_new += 1
@@ -421,9 +453,10 @@ def build_turn_fn(settings: Settings, agent: ResearchAgent | None = None) -> Tur
     return turn
 
 
-def build_measure_fn(agent: ResearchAgent) -> MeasureFn:
+def build_measure_fn(agent: ResearchAgent, judge: StructuredLLM | None = None) -> MeasureFn:
     """Claim check of a stored answer after the turn: the cited chunks are read from the
-    index by id, the judge is the agent's claim judge (same prompt as the verify node)."""
+    index by id; the judge is ``judge`` or the agent's claim judge (same prompt as the
+    verify node)."""
     settings = agent.settings
 
     def measure(rec: EvalRecord) -> ClaimMeasurement:
@@ -436,7 +469,10 @@ def build_measure_fn(agent: ResearchAgent) -> MeasureFn:
             chunks.append(got[0])
         try:
             v = verify_claims(
-                rec.raw_answer, make_sources(chunks), agent.deps.judge_llm(), settings.verification
+                rec.raw_answer,
+                make_sources(chunks),
+                judge or agent.deps.judge_llm(),
+                settings.verification,
             )
         except VerificationError as exc:
             return ClaimMeasurement(error=str(exc))
@@ -452,11 +488,14 @@ def _judge_settings(settings: Settings) -> Settings:
     return settings.model_copy(update={"models": models, "llm": llm_cfg})
 
 
-def build_claim_judge(settings: Settings) -> ChatStructuredLLM:
-    """Claim-verification judge: ``models.judge`` at temperature 0, without fallback."""
+def build_claim_judge(settings: Settings, model: str | None = None) -> ChatStructuredLLM:
+    """Claim-verification judge: ``model`` (default ``models.judge``) at temperature 0,
+    without fallback to another model."""
     s = _judge_settings(settings)
+    name = model or s.models.judge
+    s = s.model_copy(update={"models": s.models.model_copy(update={"fallback": name})})
     try:
-        chat = get_chat_model("judge", s)
+        chat = get_chat_model("judge", s, model=name)
     except LLMConfigError as exc:
         raise AgentConfigError(str(exc)) from exc
     return ChatStructuredLLM(chat, max_attempts=s.llm.max_retries)

@@ -80,6 +80,8 @@ class StoredClaimRate:
     claims count as not supported. None if the check did not run or found no claims."""
 
     def supported_claim_rate(self, record: EvalRecord, question: GoldQuestion) -> float | None:
+        if record.independent_judge is not None:  # independent judge (models.eval_judge)
+            return None if record.independent_error is not None else record.independent_rate
         if not record.claims_checked or record.claim_error is not None:
             return None
         return record.supported_rate

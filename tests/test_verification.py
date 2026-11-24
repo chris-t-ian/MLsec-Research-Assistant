@@ -693,3 +693,24 @@ def test_label_claims_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     save_manifest(tmp_path, manifest.model_copy(update={"split": "test", "final": True}))
     assert mod.main([str(tmp_path), "--report"]) == 2
     assert mod.plain("a\x1b[31mb") == "a [31mb"
+
+
+def test_flag_precision_and_recall() -> None:
+    def lab(key: str, human: str, judge: str) -> HumanLabel:
+        return HumanLabel(key=key, human=human, judge_label=judge, final_label=judge)  # type: ignore[arg-type]
+
+    labels = [
+        lab("1", "supported", "supported"),  # not flagged, good
+        lab("2", "unsupported", "unsupported"),  # flagged, bad: hit
+        lab("3", "partially_supported", "unsupported"),  # flagged, bad (partial = bad): hit
+        lab("4", "supported", "partially_supported"),  # flagged, good: false alarm
+        lab("5", "unsupported", "supported"),  # missed
+    ]
+    a = agreement(labels, "final_label", "final")
+    assert (a.n_flagged, a.n_bad) == (3, 3)
+    assert a.flag_precision == pytest.approx(2 / 3) and a.flag_recall == pytest.approx(2 / 3)
+    md = render_agreement([a], "eval/results/x", "judge/model")
+    assert "| final | 3 | 3 | 0.667 | 0.667 |" in md
+
+    none = agreement([lab("1", "supported", "supported")], "final_label")
+    assert none.flag_precision is None and none.flag_recall is None

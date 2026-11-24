@@ -786,3 +786,57 @@ def test_accuracy_and_cohens_kappa() -> None:
     assert cohens_kappa([], []) is None and accuracy([], []) is None
     with pytest.raises(ValueError):
         cohens_kappa(["s"], [])
+
+
+def test_independent_judge_checks_every_arm_and_drives_the_metric(tmp_path: Path) -> None:
+    questions = [q("1"), q("2"), q("3", "out_of_scope", gold=[])]
+    manifest = _manifest(["1", "2", "3"], ["hybrid"]).model_copy(
+        update={"verification_modes": ["off", "flag"], "independent_judge_model": "other/judge"}
+    )
+    store = ResultStore(tmp_path / "results.jsonl")
+
+    def turn(question: str, session: SessionState, sink: EventSink) -> TurnResult:
+        res = _turn_result(question, session).model_copy(
+            update={"sources": [SourceRef(number=1, chunk_id="g:1", arxiv_id="1", label="L")]}
+        )
+        if session.verification == "flag":  # the verifier's own (optimistic) check
+            info = VerificationInfo(policy="flag", status="ok")
+            res = res.model_copy(
+                update={
+                    "claim_checks": _checks(["supported"]),
+                    "supported_rate": 1.0,
+                    "verification": info,
+                }
+            )
+        return res
+
+    def measure(r: EvalRecord) -> ClaimMeasurement:  # verifier judge, post hoc for "off"
+        return ClaimMeasurement(checks=_checks(["supported"]), supported_rate=1.0)
+
+    independent_calls: list[str] = []
+
+    def independent(r: EvalRecord) -> ClaimMeasurement:
+        independent_calls.append(f"{r.arm}/{r.question_id}")
+        return ClaimMeasurement(checks=_checks(["supported", "unsupported"]), supported_rate=0.5)
+
+    out = run_eval(
+        manifest, questions, store, turn, FakeJudge(), measure=measure, independent=independent
+    )
+    # Every in-scope answer of every arm, out-of-scope questions skipped.
+    assert independent_calls == ["hybrid/1", "hybrid+flag/1", "hybrid/2", "hybrid+flag/2"]
+    loaded = store.load()[("hybrid", "flag", "1")]
+    assert loaded.supported_rate == 1.0  # the verifier's own number is kept
+    assert loaded.independent_judge == "other/judge" and loaded.independent_rate == 0.5
+
+    summary = summarize(out.records, questions, manifest.arms(), k=8, seed=0, n_resamples=200)
+    row = summary.get("hybrid+flag", "supported_claim_rate")
+    assert row is not None and row.estimate.mean == pytest.approx(0.5)  # independent judge
+
+    # Resume: already measured by this judge -> nothing to do.
+    independent_calls.clear()
+    again = run_eval(
+        manifest, questions, store, turn, FakeJudge(), measure=measure, independent=independent
+    )
+    assert again.n_new == 0 and independent_calls == []
+    text = write_report(tmp_path, summary, manifest, questions).read_text()
+    assert "independent judge `other/judge`" in text

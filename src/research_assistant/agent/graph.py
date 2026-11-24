@@ -14,7 +14,9 @@ tools             enforces the tool policy (allowlist, <= 6 calls per turn, inge
                   to the model as spotlighted ToolMessages.
 finalize          writes the answer with the cited-answer generator from the collected
                   sources and tool results, so every answer goes through one citation pipeline;
-                  checks the output for the session canary.
+                  checks the output for the session canary and removes external links and
+                  images to non-allowlisted hosts (security.output_filter), also while
+                  streaming.
 verify            claim verification (research_assistant.verification): the judge model checks
                   every cited sentence against its cited chunks, then the policy (flag /
                   remove / regenerate, from ``verification.policy`` or the session) is
@@ -120,6 +122,7 @@ from research_assistant.security.canary import (
 )
 from research_assistant.security.injection_detect import InjectionDetector
 from research_assistant.security.input_validation import validate_input
+from research_assistant.security.output_filter import OutputFilterSink, filter_markdown
 from research_assistant.security.tool_policy import (
     AuditLog,
     ToolPolicy,
@@ -841,7 +844,9 @@ class ResearchAgent:
         past, _ = split_turns(messages)
         n_hist = self.settings.agent.history_turns
         history = past[-n_hist:] if n_hist else []
-        guard = CanaryGuardSink(ctx.sink, session.canary)
+        # Streamed tokens: canary check on the raw text, then the link/image filter.
+        filtered = OutputFilterSink(ctx.sink)
+        guard = CanaryGuardSink(filtered, session.canary)
         generated = False
         try:
             ans = self._generate(q, chunks, evidence, history, ctx, guard)
@@ -852,6 +857,8 @@ class ResearchAgent:
             guard.token(msg)
             guard.flush()
             ans = Answer(question=q, text=msg, raw_text=msg)
+        if not guard.tripped:
+            filtered.flush()
 
         if guard.tripped or contains_canary(ans.text, session.canary):
             log_incident("final answer", session.session_id)
@@ -908,7 +915,7 @@ class ResearchAgent:
         sink: EventSink,
         revision: Sequence[str] = (),
     ) -> Answer:
-        return generate_answer(
+        ans = generate_answer(
             q,
             chunks,
             sink,
@@ -921,6 +928,31 @@ class ResearchAgent:
             revision=revision,
             step_prefix=f"generation:{ctx.strategy}:revision" if revision else None,
         )
+        return self._filter_output(ans, ctx)
+
+    @staticmethod
+    def _filter_output(ans: Answer, ctx: TurnContext) -> Answer:
+        """``ans`` without links/images to non-allowlisted hosts (text and raw text)."""
+        text = filter_markdown(ans.text)
+        raw = filter_markdown(ans.raw_text)
+        if not (text.changed or raw.changed):
+            return ans
+        n_img = max(text.removed_images, raw.removed_images)
+        n_link = max(text.removed_links, raw.removed_links)
+        logger.warning(
+            "Output filter removed %d image(s) and %d link(s) (session %s)",
+            n_img,
+            n_link,
+            ctx.session.session_id,
+        )
+        if not any(e.kind == "output_filtered" for e in ctx.events):
+            ctx.events.append(
+                SecurityEvent(
+                    kind="output_filtered",
+                    detail="External links or images in the answer were removed.",
+                )
+            )
+        return ans.model_copy(update={"text": text.text, "raw_text": raw.text})
 
     def _verify(self, state: AgentState, ctx: TurnContext) -> tuple[dict[str, Any], dict[str, Any]]:
         ans = ctx.answer

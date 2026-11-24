@@ -62,6 +62,10 @@ class ConsoleSink:
         if self.stream:
             print(text, end="", flush=True)
 
+    def answer_ready(self, answer: Any, verifying: bool) -> None:
+        if verifying and self.show_steps:
+            print("\n  .. checking claims", file=sys.stderr, flush=True)
+
 
 def print_turn(res: TurnResult) -> None:
     sys.stderr.flush()

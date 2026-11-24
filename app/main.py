@@ -3,6 +3,10 @@
 Thin layer: it calls the core (``run_turn``, ``confirm_pending_ingest``, exports) and renders
 the results with :mod:`render`. No retrieval, agent, security or export logic lives here.
 
+Startup fails fast: the module runs the core startup checks (configuration, secrets,
+strategies, search index) when Chainlit loads it and exits with a readable message if any
+fails. Every incoming message passes the per-session rate limit first.
+
 Chat history is stored in SQLite (schema: ``research_assistant.persistence``); it needs a
 login, so a password callback checks the demo user from .env. Each answer message stores its
 ``TurnResult`` as JSON in its metadata, from which the export actions rebuild the conversation.
@@ -61,8 +65,16 @@ from research_assistant.retrieval.strategies import (
     get_strategy,
     strategy_names,
 )
+from research_assistant.security.rate_limit import default_rate_limiter
+from research_assistant.startup import format_problems, run_checks
 
 logger = logging.getLogger("app")
+
+_startup_problems = run_checks("app")
+if _startup_problems:
+    _msg = format_problems(_startup_problems)
+    logger.critical(_msg)
+    raise SystemExit(_msg)
 
 SESSION_KEY = "research_session"
 RESEARCH_PROFILE = "Research Assistant"
@@ -410,6 +422,11 @@ async def _guide_message(message: cl.Message) -> None:
 async def on_message(message: cl.Message) -> None:
     error_id = _error_id()
     try:
+        decision = default_rate_limiter().check(cl.context.session.id)
+        if not decision.allowed:
+            logger.info("Rate limit hit (session %s)", cl.context.session.id)
+            await cl.Message(content=decision.message).send()
+            return
         if _is_guide():
             await _guide_message(message)
             return

@@ -82,6 +82,12 @@ class EvalRecord(BaseModel):
     supported_rate: float | None = None
     claims_checked: bool = False
     claim_error: str | None = None
+    # Claim check of the final answer by an independent judge (models.eval_judge), the same
+    # for every arm. When set, the supported-claim rate metric uses it instead of the above.
+    independent_judge: str | None = None
+    independent_checks: list[ClaimCheck] = Field(default_factory=list)
+    independent_rate: float | None = None
+    independent_error: str | None = None
     created_at: str
 
     @property

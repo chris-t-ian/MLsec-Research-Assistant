@@ -350,6 +350,15 @@ def render_report(
         f"- **Models:** answer `{manifest.main_model}`, judge (key facts, refusals, claims) "
         f"`{manifest.judge_model}`, "
         f"temperature {manifest.temperature}",
+        *(
+            [
+                f"- **Supported-claim rate:** independent judge "
+                f"`{manifest.independent_judge_model}` on the final answer of every arm "
+                "(not the verifier the modes use)"
+            ]
+            if manifest.independent_judge_model
+            else []
+        ),
         f"- **Git commit:** `{commit}`",
         f"- **Gold file:** `{manifest.gold_file}` (sha256 `{manifest.gold_sha256[:12]}`)",
         f"- **Bootstrap:** {summary.n_resamples:,} resamples over questions, seed "

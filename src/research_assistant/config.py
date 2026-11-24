@@ -30,6 +30,9 @@ class ModelsConfig(BaseModel):
     selectable: list[str] = Field(default_factory=list)
     # Query rewriter for eval/tune_retrieval.py (query translation, self-query); judge if unset.
     retrieval_tuning: str | None = None
+    # Independent claim judge for eval/run_eval.py: re-checks the final answers of every arm
+    # with a model other than the verifier (judge). Unset: the verifier's own checks are used.
+    eval_judge: str | None = None
 
     def choices(self) -> list[str]:
         """Models a session may answer with: main first, then fallback and ``selectable``."""
@@ -112,6 +115,8 @@ class SemanticScholarConfig(BaseModel):
 
 class LimitsConfig(BaseModel):
     max_question_chars: int = Field(default=2000, gt=0)
+    # Per chat session, sliding 60 s window (research_assistant.security.rate_limit).
+    messages_per_minute: int = Field(default=20, ge=1, le=1000)
 
 
 class RetrievalConfig(BaseModel):
@@ -229,6 +234,8 @@ class Settings(BaseSettings):
     # Single demo login of the web UI (chat history needs authentication).
     demo_username: str | None = None
     demo_password: SecretStr | None = None
+    # Signs Chainlit session tokens (read by Chainlit itself; here only checked at startup).
+    chainlit_auth_secret: SecretStr | None = None
 
     # Non-secret config (from settings.yaml).
     models: ModelsConfig
@@ -266,13 +273,30 @@ class ConfigError(RuntimeError):
     """Raised when configuration is missing or invalid."""
 
 
+MAX_CONFIG_ERRORS = 10
+
+
+def describe_validation_error(exc: ValidationError) -> str:
+    """Readable summary of a settings ValidationError: one line per field, no input values
+    (they may be secrets)."""
+    lines = [f"Invalid configuration in {SETTINGS_YAML.relative_to(PROJECT_ROOT)} or .env:"]
+    errors = exc.errors(include_url=False, include_input=False, include_context=False)
+    for err in errors[:MAX_CONFIG_ERRORS]:
+        loc = ".".join(str(x) for x in err.get("loc", ())) or "(root)"
+        msg = str(err.get("msg", "invalid value")).removeprefix("Value error, ")
+        lines.append(f"  {loc}: {msg}")
+    if len(errors) > MAX_CONFIG_ERRORS:
+        lines.append(f"  ... and {len(errors) - MAX_CONFIG_ERRORS} more")
+    return "\n".join(lines)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Load settings once per process and configure logging."""
     try:
         settings = Settings()  # type: ignore[call-arg]  # fields come from yaml/env sources
     except ValidationError as exc:
-        raise ConfigError(f"Invalid configuration in {SETTINGS_YAML} or environment") from exc
+        raise ConfigError(describe_validation_error(exc)) from exc
     configure_logging(settings.logging.level)
     return settings
 

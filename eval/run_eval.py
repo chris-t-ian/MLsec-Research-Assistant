@@ -34,6 +34,7 @@ from research_assistant.abtest.runner import (
     RunManifest,
     append_test_log,
     build_agent,
+    build_claim_judge,
     build_judge,
     build_measure_fn,
     build_turn_fn,
@@ -131,6 +132,7 @@ def new_manifest(args: argparse.Namespace, settings: Settings) -> RunManifest:
         question_ids=[q.id for q in pool],
         main_model=settings.models.main,
         judge_model=settings.models.judge,
+        independent_judge_model=settings.models.eval_judge,
         temperature=0.0,
         k=args.k,
         seed=args.seed,
@@ -209,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
             judge,
             ConsoleProgress(),
             measure=build_measure_fn(agent),
+            independent=(
+                build_measure_fn(
+                    agent, build_claim_judge(settings, manifest.independent_judge_model)
+                )
+                if manifest.independent_judge_model
+                else None
+            ),
         )
     except (ConfigError, GoldFileError, EvalRunError, AgentConfigError, StrategyConfigError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

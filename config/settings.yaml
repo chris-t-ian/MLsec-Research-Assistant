@@ -9,6 +9,10 @@ models:
   selectable: []
   # Query rewriter for retrieval-only tuning (eval/tune_retrieval.py); judge if unset.
   retrieval_tuning: anthropic/claude-haiku-4.5
+  # Independent claim judge for eval/run_eval.py: re-checks the final answer of every arm, so
+  # verification modes are not scored by the verifier they use (judge). A different model
+  # family than main (writer) and judge (verifier). Remove to score with the verifier.
+  eval_judge: openai/gpt-4.1-mini
 
 llm:
   base_url: https://openrouter.ai/api/v1
@@ -30,6 +34,7 @@ paths:
 
 limits:
   max_question_chars: 2000
+  messages_per_minute: 20   # per chat session, sliding 60 s window
 
 retrieval:
   top_k: 8

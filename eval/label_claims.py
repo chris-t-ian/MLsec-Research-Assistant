@@ -10,8 +10,8 @@ sentences have no judge verdict and are not sampled. For each claim the terminal
 question, the sentence and the full text of the chunks it cites, but not the judge's label.
 Answer s (supported), p (partially supported), u (unsupported), k (skip) or q (quit). Labels
 are appended to <run>/claim_labels.jsonl right away, so you can stop and continue later. The
-end prints accuracy and Cohen's kappa of the judge against your labels and writes
-<run>/judge_agreement.md.
+end prints accuracy, Cohen's kappa and flag precision/recall of the judge against your
+labels and writes <run>/judge_agreement.md.
 
 The run must be a dev-split run whose records carry claim checks (eval/run_eval.py after
 step 14). Paper text is printed as plain text with control characters removed.
