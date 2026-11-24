@@ -1,4 +1,4 @@
-# MLsec Research Assistant
+# ML Privacy & Security Research Assistant
 
 A cited research assistant for machine-learning privacy and security: membership inference,
 differential privacy and DP-SGD, model inversion, training-data extraction and prompt

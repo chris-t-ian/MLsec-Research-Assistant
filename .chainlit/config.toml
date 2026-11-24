@@ -116,7 +116,7 @@ reaction_on_message_received = false
 
 [UI]
 # Name of the assistant.
-name = "MLsec Research Assistant"
+name = "ML Privacy & Security Research Assistant"
 
 # default_theme = "dark"
 
