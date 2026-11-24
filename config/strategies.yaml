@@ -20,7 +20,8 @@ strategies:
     rerank: false
 
   # baseline_dense with the parameters tuned on dev (eval/results/tuning-20261123-102932:
-  # 0.46 -> 0.62 gold papers found). Not checked on the test split. App default
+  # 0.46 -> 0.62 gold papers found); test confirmation eval/results/confirm-20261124-102727:
+  # 0.49 -> 0.58 (+0.09 [0.05, 0.12]) vs. baseline_dense with cap 2. App default
   # (agent.default_strategy); baseline_dense itself stays unchanged as the eval reference.
   - name: baseline_dense_tuned
     query_translation: none

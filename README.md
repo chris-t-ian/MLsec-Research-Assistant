@@ -165,7 +165,7 @@ claim points to the passage it came from.
 
    Every strategy caps chunks per paper (2) for diversity and never returns quarantined
    chunks. The app default `baseline_dense_tuned` (dense, 12 chunks) was chosen on the dev
-   split.
+   split and confirmed on the test split (see [Results](#results)).
 5. **Augment.** The retrieved chunks are numbered and put into the writer's prompt, each
    inside a delimiter with a random per-request boundary:
    `<<SRC-3f9a1c0e id=3 paper="..." ref="Carlini et al. 2021" section="...">> … <<END-3f9a1c0e>>`.
@@ -405,7 +405,22 @@ the retrieved chunks (comparison questions have several).
 search (Δ +1,401 [+755, +1,997]), and the difference to `baseline_dense` is not significant.
 `full` was best on dev by MRR, but that edge did not hold on test. Query translation in this
 run used `anthropic/claude-haiku-4.5`; the app uses `models.judge`. The app default is
-`baseline_dense_tuned` (dense, top_k 12). It was chosen on dev and has not been run on test.
+`baseline_dense_tuned` (dense, top_k 12), confirmed separately below.
+
+**App default on test.** `eval/results/confirm-20261124-102727`: the same 39 questions, run
+after the default was chosen. Both strategies now use the 2-chunks-per-paper cap, so this
+`baseline_dense` (top_k 8) scores slightly higher than in the run above (cap 3). Dense search
+needs no LLM call, so the run cost nothing. It is a second test-split run, logged in
+`eval/results/test_runs.log`. No parameter was changed on the basis of the first.
+
+| Strategy | Gold papers found | Recall (any gold paper) | MRR | Context tokens | Δ gold found vs. baseline |
+|---|---|---|---|---|---|
+| `baseline_dense` (top_k 8) | 0.49 [0.41, 0.57] | 0.95 [0.87, 1.00] | 0.78 [0.67, 0.88] | 3,848 | — |
+| `baseline_dense_tuned` (top_k 12) | 0.58 [0.49, 0.66] | 0.95 [0.87, 1.00] | 0.78 [0.67, 0.88] | 5,866 | +0.09 [+0.05, +0.12] |
+
+The tuned default finds significantly more gold papers (dev: +0.16). The gain comes only from
+the 4 extra chunks: the top-ranked chunks are the same (Δ MRR 0), and each search adds about
+2,000 context tokens (Δ +2,018 [+1,819, +2,201]).
 
 ### End-to-end A/B (answers): dev pilot
 

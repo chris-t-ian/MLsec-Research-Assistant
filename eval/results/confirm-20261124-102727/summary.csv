@@ -1,0 +1,11 @@
+config,base_strategy,params,metric,n,mean,ci_low,ci_high,diff_vs_ref,diff_ci_low,diff_ci_high,pareto
+baseline_dense_tuned,baseline_dense_tuned,{},gold_coverage,39,0.576811151811152,0.4942811355311357,0.6566562372812373,0.08532763532763533,0.05071225071225071,0.12222222222222222,True
+baseline_dense_tuned,baseline_dense_tuned,{},recall_any,39,0.9487179487179487,0.8717948717948718,1.0,0.0,0.0,0.0,True
+baseline_dense_tuned,baseline_dense_tuned,{},recall@3,39,0.8717948717948718,0.7692307692307693,0.9743589743589743,0.0,0.0,0.0,True
+baseline_dense_tuned,baseline_dense_tuned,{},mrr,39,0.7807692307692308,0.6662393162393163,0.8811965811965812,0.0,0.0,0.0,True
+baseline_dense_tuned,baseline_dense_tuned,{},context_tokens,39,5866.25641025641,5566.023076923077,6155.340384615384,2018.4358974358975,1818.6557692307695,2201.1576923076923,True
+baseline_dense,baseline_dense,{},gold_coverage,39,0.49148351648351635,0.4140819597069598,0.5697603785103785,,,,True
+baseline_dense,baseline_dense,{},recall_any,39,0.9487179487179487,0.8717948717948718,1.0,,,,True
+baseline_dense,baseline_dense,{},recall@3,39,0.8717948717948718,0.7692307692307693,0.9743589743589743,,,,True
+baseline_dense,baseline_dense,{},mrr,39,0.7807692307692308,0.6662393162393163,0.8811965811965812,,,,True
+baseline_dense,baseline_dense,{},context_tokens,39,3847.8205128205127,3613.351282051282,4079.7192307692308,,,,True
