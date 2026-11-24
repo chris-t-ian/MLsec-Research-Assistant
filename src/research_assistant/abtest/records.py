@@ -1,0 +1,124 @@
+"""Records of one evaluation run (one line of results.jsonl per strategy x question)."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+from research_assistant.abtest.gold import QuestionType, Split
+from research_assistant.models import ClaimCheck, TokenUsage, VerificationPolicy
+
+
+class RetrievedChunk(BaseModel):
+    chunk_id: str
+    arxiv_id: str
+    rank: int = Field(ge=1)
+
+
+class SearchRecord(BaseModel):
+    """The final chunk selection of one ``search_knowledge_base`` call."""
+
+    query: str
+    chunks: list[RetrievedChunk] = Field(default_factory=list)
+    latency_ms: float = 0.0
+
+
+class FactJudgment(BaseModel):
+    fact: str
+    covered: bool
+    rationale: str = ""
+
+
+class RefusalJudgment(BaseModel):
+    correct: bool = Field(description="The answer declines / corrects the premise as expected.")
+    rationale: str = ""
+
+
+class JudgeResult(BaseModel):
+    model: str
+    facts: list[FactJudgment] = Field(default_factory=list)
+    refusal: RefusalJudgment | None = None
+    token_usage: TokenUsage = TokenUsage()
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+
+def arm_name(strategy: str, verification: str) -> str:
+    """Experiment arm: the strategy alone without verification, else ``strategy+mode``."""
+    return strategy if verification == "off" else f"{strategy}+{verification}"
+
+
+class EvalRecord(BaseModel):
+    """Everything the metrics need about one (strategy, verification mode, question) turn."""
+
+    run_id: str
+    strategy: str
+    # Claim verification policy of the turn ("off" for records of older runs).
+    verification: VerificationPolicy = "off"
+    question_id: str
+    question_type: QuestionType
+    split: Split | None
+    question: str
+    answer: str
+    raw_answer: str = ""
+    cited_arxiv_ids: list[str] = Field(
+        default_factory=list, description="arXiv ID per citation, in citation-number order."
+    )
+    searches: list[SearchRecord] = Field(default_factory=list)
+    tool_calls: list[str] = Field(default_factory=list)
+    blocked: bool = False
+    model: str | None = None
+    token_usage: TokenUsage = TokenUsage()
+    latency_ms: float = 0.0
+    event_counts: dict[str, int] = Field(default_factory=dict)
+    judge: JudgeResult | None = None
+    # Source number -> chunk id of every chunk given to the answer generator (lets the
+    # claims of an unverified answer be checked after the turn).
+    sources: dict[int, str] = Field(default_factory=dict)
+    # Claim check: by the agent (flag / remove / regenerate) or, for "off", after the turn.
+    claim_checks: list[ClaimCheck] = Field(default_factory=list)
+    supported_rate: float | None = None
+    claims_checked: bool = False
+    claim_error: str | None = None
+    # Claim check of the final answer by an independent judge (models.eval_judge), the same
+    # for every arm. When set, the supported-claim rate metric uses it instead of the above.
+    independent_judge: str | None = None
+    independent_checks: list[ClaimCheck] = Field(default_factory=list)
+    independent_rate: float | None = None
+    independent_error: str | None = None
+    created_at: str
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.strategy, self.verification, self.question_id)
+
+    @property
+    def arm(self) -> str:
+        return arm_name(self.strategy, self.verification)
+
+    def retrieved_arxiv_ids(self) -> list[str]:
+        """Paper of every retrieved chunk, searches in call order, ranks within a search.
+
+        Chunks repeated by a later search are counted once (first occurrence).
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for s in self.searches:
+            for c in sorted(s.chunks, key=lambda c: c.rank):
+                if c.chunk_id not in seen:
+                    seen.add(c.chunk_id)
+                    out.append(c.arxiv_id)
+        return out
+
+
+__all__ = [
+    "EvalRecord",
+    "FactJudgment",
+    "JudgeResult",
+    "RefusalJudgment",
+    "RetrievedChunk",
+    "SearchRecord",
+    "arm_name",
+]

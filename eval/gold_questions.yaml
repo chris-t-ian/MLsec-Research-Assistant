@@ -1,0 +1,977 @@
+# Gold questions for ML security/privacy RAG assistant v1
+# type: factual | comparison | method | out_of_scope
+# gold_arxiv_ids reference papers.yaml. notes.facts: checked = verified against sources;
+#   partial = numbers checked, rest from memory; memory = verify against the papers before use.
+
+- id: 1
+  question: How does LiRA work, and why does it report TPR at low FPR?
+  type: method
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2112.03570'
+  - '1908.11229'
+  - '2111.08440'
+  - '2005.10881'
+  key_facts:
+  - LiRA fits Gaussians to the target example's loss/logit under in- and out-shadow models and applies a likelihood-ratio test.
+  - Its authors argue MIAs should be evaluated by TPR at low FPR (e.g. <0.1%), not average accuracy.
+  - LiRA is reported as about 10x more powerful than prior attacks at low FPR.
+  notes: 'orig_tags: def; facts: partial (numbers checked, rest from memory)'
+- id: 2
+  question: How do shadow-model attacks (Shokri et al.) differ from loss-threshold attacks (Yeom et al.) in assumptions and strength?
+  type: comparison
+  topic: membership_inference
+  split: dev
+  gold_arxiv_ids:
+  - '1610.05820'
+  - '1709.01604'
+  - '1806.01246'
+  - '2003.10595'
+  - '2103.07853'
+  key_facts:
+  - Shokri et al. train shadow models that mimic the target and an attack classifier on their outputs.
+  - Yeom et al. threshold the per-example loss and relate MIA advantage to the generalization gap.
+  - Simple metric-based attacks can match shadow-model attacks on average metrics.
+  notes: 'orig_tags: comp; facts: memory (verify against papers)'
+- id: 3
+  question: What does RMIA improve over LiRA, especially with few reference models?
+  type: comparison
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2312.03262'
+  - '2112.03570'
+  - '2111.09679'
+  - '2307.03694'
+  - '2603.11799'
+  key_facts:
+  - RMIA compares the target sample's likelihood ratio against population samples (pairwise test).
+  - RMIA stays strong with as few as 1 reference model, where offline LiRA degrades toward random guessing.
+  notes: 'orig_tags: comp; facts: partial (numbers checked, rest from memory)'
+- id: 4
+  question: Why is balanced accuracy / AUC a misleading metric for MIA evaluation?
+  type: factual
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2112.03570'
+  - '2005.10881'
+  - '2005.13702'
+  - '2404.17399'
+  - '2603.22987'
+  key_facts:
+  - Balanced accuracy and AUC average over all thresholds and hide whether any member is identified with high confidence.
+  - TPR at low FPR captures the privacy-relevant regime of confidently exposing a few members.
+  - Realistic member priors (members rare) make average-metric results look much weaker.
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 5
+  question: Which training samples are most vulnerable to MIA, and why?
+  type: method
+  topic: membership_inference
+  split: dev
+  gold_arxiv_ids:
+  - '2206.10469'
+  - '2008.03703'
+  - '1802.04889'
+  - '1906.11798'
+  - '2306.10308'
+  key_facts:
+  - Outliers and atypical / long-tail examples are most vulnerable.
+  - Vulnerability is linked to memorization of rare examples.
+  - 'Onion effect: removing the most vulnerable points makes previously safe points vulnerable.'
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 6
+  question: How do label-only MIAs work, and how close do they get to confidence-based attacks?
+  type: comparison
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2007.14321'
+  - '2007.15528'
+  - '2003.10595'
+  key_facts:
+  - Label-only MIAs use only the predicted label, e.g. robustness to augmentations/perturbations or distance to the decision boundary.
+  - They approach the performance of confidence-based attacks.
+  - They defeat confidence-masking defenses such as MemGuard.
+  notes: 'orig_tags: comp; facts: partial (numbers checked, rest from memory)'
+- id: 7
+  question: Do defenses like MemGuard or adversarial regularization actually hold up against adaptive attacks?
+  type: factual
+  topic: membership_inference
+  split: dev
+  gold_arxiv_ids:
+  - '1909.10594'
+  - '1807.05852'
+  - '2003.10595'
+  - '2007.14321'
+  - '2404.17399'
+  - '2110.08324'
+  - '2207.05801'
+  key_facts:
+  - MemGuard-defended models still reach 69.1% MIA accuracy on Location-30 and 74.2% on Texas-100 under metric-based attacks (Song & Mittal).
+  - Label-only attacks bypass confidence-masking defenses entirely.
+  - Only DP and strong L2 regularization stopped all attacks in Choquette-Choo et al.
+  - Aerni et al. show many defense evaluations are misleading (e.g. average-case metrics, weak attacks).
+  notes: 'orig_tags: crit; facts: checked'
+- id: 8
+  question: What is the current state of MIA against pretrained LLMs, and why are the results contested?
+  type: factual
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2402.07841'
+  - '2406.16201'
+  - '2406.17975'
+  - '2505.18773'
+  - '2411.00154'
+  - '2409.19798'
+  - '2410.07582'
+  key_facts:
+  - Duan et al. find MIAs barely outperform random guessing on Pythia models (160M-12B) with IID member/non-member splits.
+  - Apparent successes on benchmarks like WikiMIA are largely due to temporal distribution shift.
+  - Blind baselines that never query the model beat published MIAs on shifted benchmarks.
+  - Remaining signal comes from strong reference-model attacks or document/dataset-level aggregation.
+  notes: 'orig_tags: sota, crit; facts: checked; Must be presented as contested.'
+- id: 9
+  question: How does Min-K% Prob work, and what are its failure modes?
+  type: method
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2310.16789'
+  - '2404.02936'
+  - '2402.07841'
+  - '2406.16201'
+  key_facts:
+  - Min-K% Prob averages the log-probabilities of the k% lowest-probability tokens in the text.
+  - Min-K%++ normalizes token log-probabilities by the mean/variance of the model's distribution.
+  - Reported success on WikiMIA is largely explained by distribution shift; on IID splits performance is near random.
+  notes: 'orig_tags: def, crit; facts: partial (numbers checked, rest from memory)'
+- id: 10
+  question: What are dataset inference and document-level membership inference for LLMs, and how are they used for copyright questions?
+  type: method
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2104.10706'
+  - '2406.06443'
+  - '2310.15007'
+  - '2402.09363'
+  - '2405.15523'
+  - '2409.19798'
+  key_facts:
+  - Dataset inference aggregates membership signals across many samples with a statistical test instead of deciding per sample.
+  - Document-level MI aggregates token-level signals over a whole document.
+  - Copyright traps inject unique synthetic sequences into documents so their later inclusion can be detected.
+  - MIA results alone cannot prove a model was trained on specific data.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 11
+  question: How do MIAs on fine-tuned LLMs compare to MIAs on pretraining data in terms of success rates?
+  type: comparison
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2311.06062'
+  - '2203.03929'
+  - '2205.12506'
+  - '2310.09266'
+  - '2305.18462'
+  key_facts:
+  - Fine-tuning data (small sets, several epochs) is considerably more vulnerable to MIA than pretraining data.
+  - Neighbourhood attacks compare a sample's loss with perturbed neighbours and need no reference model.
+  - High reported fine-tuning MIA numbers often rely on reference-model assumptions.
+  notes: 'orig_tags: comp; facts: memory (verify against papers)'
+- id: 12
+  question: How do MIAs against generative models work?
+  type: method
+  topic: membership_inference
+  split: dev
+  gold_arxiv_ids:
+  - '1705.07663'
+  - '1909.03935'
+  - '2302.01316'
+  - '2312.05140'
+  - '2301.13188'
+  key_facts:
+  - GAN attacks use discriminator confidence or reconstruction distance to generated samples.
+  - Diffusion-model attacks such as SecMI use the denoising/posterior estimation error at selected timesteps.
+  - Diffusion models memorize and replicate some (often duplicated) training images.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 13
+  question: What is a no-box attack against synthetic data?
+  type: method
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2302.12580'
+  - '2211.06550'
+  - '2011.07018'
+  - '2602.07126'
+  - '2605.06835'
+  key_facts:
+  - In the no-box setting the attacker only sees the released synthetic dataset (plus possibly reference data), not the generator.
+  - TAPAS frames threat models as a ladder of attacker knowledge.
+  - DOMIAS scores records by the density ratio of synthetic data to reference data.
+  - Stadler et al. find synthetic data does not give a better privacy-utility trade-off than traditional anonymization.
+  notes: 'orig_tags: def; facts: memory (verify against papers); Hilprecht et al. 2019 (not in corpus) may be mentioned.'
+- id: 14
+  question: What is the most successful no-box attack and how does it compare to DOMIAS?
+  type: comparison
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2508.21146'
+  - '2302.12580'
+  - '2406.13012'
+  - '2509.05350'
+  - '2512.08875'
+  - '2509.18014'
+  - '2505.01524'
+  - '2503.12008'
+  - '2603.19185'
+  - '2605.14686'
+  key_facts:
+  - Gen-LRA ranks first on AUC in 38.6% of runs across 35 datasets and 9 generators, with mean AUC 0.589 over the top-100 leakage runs.
+  - Gen-LRA's authors state no single attack is uniformly optimal.
+  - In a 2,565-state benchmark the best single attack (DPI) is top on AUC in only 16.2% of states.
+  - Ensembles improve mean rank but do not achieve a higher best-case win rate than single attacks.
+  - The MIDST winner trains an MLP on diffusion-loss features using shadow models, so it is not a no-box attack.
+  notes: 'orig_tags: sota, crit; facts: checked; Gen-LRA, DPI and the ensembling study share authors; flag thin independent replication.'
+- id: 15
+  question: 'Walk through DP-SGD: per-sample clipping, noise addition, and privacy accounting.'
+  type: method
+  topic: differential_privacy
+  split: dev
+  gold_arxiv_ids:
+  - '1607.00133'
+  - '1908.10530'
+  - '2303.00654'
+  - '2506.11687'
+  key_facts:
+  - DP-SGD clips each per-example gradient to norm C.
+  - It adds Gaussian noise with standard deviation proportional to sigma*C to the summed gradient.
+  - Batches are formed by (Poisson) subsampling, which amplifies privacy.
+  - Total privacy loss is tracked across steps with a privacy accountant.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 16
+  question: 'Moments accountant vs. RDP vs. PRV/GDP accounting: what are the differences in tightness?'
+  type: comparison
+  topic: differential_privacy
+  split: dev
+  gold_arxiv_ids:
+  - '1607.00133'
+  - '1702.07476'
+  - '1908.10530'
+  - '1905.02383'
+  - '2106.02848'
+  - '2405.20769'
+  key_facts:
+  - The moments accountant is closely related to RDP accounting.
+  - Numerical PRV/PLD accountants give the tightest (near-exact) epsilon for composed subsampled Gaussians.
+  - GDP uses a central-limit approximation that can be inaccurate.
+  - Accounting implementations have pitfalls that can misreport epsilon.
+  notes: 'orig_tags: comp; facts: memory (verify against papers)'
+- id: 17
+  question: Why can the reported ε be wrong when training uses shuffled batches instead of Poisson subsampling?
+  type: factual
+  topic: differential_privacy
+  split: dev
+  gold_arxiv_ids:
+  - '2403.17673'
+  - '2411.04205'
+  - '2411.10614'
+  - '2405.20769'
+  key_facts:
+  - Standard accountants assume Poisson subsampling.
+  - Many implementations use shuffled fixed-size batches instead.
+  - Audits show shuffled DP-SGD can leak more than the reported epsilon implies.
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 18
+  question: What ε values are used in practice, and what do they mean empirically against real attacks?
+  type: factual
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '1902.08874'
+  - '2303.00654'
+  - '2302.07225'
+  - '2201.12383'
+  - '2410.06186'
+  - '2307.00310'
+  key_facts:
+  - Deployed epsilons are often large (high single or double digits).
+  - Against realistic attacks, measured leakage is usually far below the worst-case bound.
+  - Large epsilon still provides no meaningful formal guarantee.
+  notes: 'orig_tags: prac, crit; facts: memory (verify against papers); Give ranges with explicit uncertainty.'
+- id: 19
+  question: How do you reach competitive accuracy with DP-SGD on image benchmarks (batch size, augmentation multiplicity, pretraining)?
+  type: factual
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '2204.13650'
+  - '2210.03403'
+  - '2212.06470'
+  - '2303.00654'
+  key_facts:
+  - Large batch sizes improve the DP-SGD signal-to-noise ratio.
+  - Augmentation multiplicity (averaging gradients over several augmentations per example) improves accuracy.
+  - Pretraining on public data greatly improves DP accuracy, but its privacy framing is criticized (Tramèr et al.).
+  notes: 'orig_tags: prac; facts: memory (verify against papers)'
+- id: 20
+  question: 'What works for DP fine-tuning of LLMs: full fine-tuning vs. LoRA or other parameter-efficient methods?'
+  type: factual
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '2110.05679'
+  - '2110.06500'
+  - '2501.18914'
+  - '2212.06470'
+  key_facts:
+  - Full DP fine-tuning of large pretrained LMs works well with suitable hyperparameters.
+  - Parameter-efficient methods (e.g. LoRA) reach similar utility with lower memory and compute.
+  - Results depend on public pretraining, which is itself criticized as a privacy assumption.
+  notes: 'orig_tags: prac, sota; facts: memory (verify against papers)'
+- id: 21
+  question: How does DP auditing work, and how tight are current audits (including one-run auditing)?
+  type: method
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '2006.07709'
+  - '2101.04535'
+  - '2302.07956'
+  - '2305.08846'
+  - '2410.22235'
+  - '2405.14106'
+  - '2302.03098'
+  key_facts:
+  - Auditing inserts canaries and converts the attack's TPR/FPR into an empirical lower bound on epsilon.
+  - With white-box worst-case (gradient) canaries, audits of DP-SGD are nearly tight.
+  - One-run auditing inserts many canaries into a single training run; it is cheap but gives looser bounds.
+  notes: 'orig_tags: def, sota; facts: memory (verify against papers)'
+- id: 22
+  question: Why are audits of the final model looser than audits under the all-iterates threat model?
+  type: factual
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '2101.04535'
+  - '2302.07956'
+  - '2410.06186'
+  - '2405.14457'
+  - '2405.14106'
+  key_facts:
+  - DP-SGD accounting assumes every intermediate model iterate is released.
+  - When only the final model is released, audits find less leakage than the bound.
+  - Whether hiding intermediate iterates gives formal privacy amplification in general is still open.
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 23
+  question: What is the disparate impact of DP-SGD on underrepresented groups?
+  type: factual
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '1905.12101'
+  - '2106.02674'
+  - '2206.07737'
+  key_facts:
+  - DP-SGD reduces accuracy more for underrepresented groups and classes.
+  - Clipping and noise affect rare groups' gradients disproportionately (gradient misalignment).
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 24
+  question: How should the clipping norm be chosen, and what does hyperparameter tuning cost in privacy budget?
+  type: factual
+  topic: differential_privacy
+  split: dev
+  gold_arxiv_ids:
+  - '1811.07971'
+  - '2110.03620'
+  - '2301.11989'
+  - '1905.03871'
+  - '2206.07136'
+  - '2204.13650'
+  key_facts:
+  - Adaptive clipping sets the norm from a privately estimated gradient-norm quantile.
+  - Automatic clipping normalizes gradients and removes the clipping hyperparameter.
+  - Hyperparameter tuning on private data costs privacy budget unless accounted for with private selection methods.
+  notes: 'orig_tags: prac; facts: memory (verify against papers)'
+- id: 25
+  question: How did Carlini et al. (2021) extract training data from GPT-2?
+  type: method
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '2012.07805'
+  - '1802.08232'
+  - '2202.07646'
+  key_facts:
+  - The attack generates many samples from GPT-2.
+  - Samples are ranked with membership metrics such as perplexity ratios to zlib entropy or to a smaller model.
+  - Top-ranked samples were verified against training data and included verbatim memorized text, including PII.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 26
+  question: 'Discoverable vs. extractable memorization: how does memorization scale with model size, duplication, and context length?'
+  type: comparison
+  topic: data_extraction
+  split: dev
+  gold_arxiv_ids:
+  - '2202.07646'
+  - '2304.11158'
+  - '2404.15146'
+  - '2410.19482'
+  - '2406.17746'
+  - '2310.18362'
+  key_facts:
+  - 'Extractable memorization: the sequence can be found by an attacker without the training data.'
+  - 'Discoverable memorization: the model completes a training-data prefix with the exact suffix.'
+  - Memorization grows roughly log-linearly with model size, number of duplicates, and prompt length.
+  notes: 'orig_tags: def, comp; facts: memory (verify against papers)'
+- id: 27
+  question: How did the divergence attack extract data from production models like ChatGPT?
+  type: method
+  topic: data_extraction
+  split: dev
+  gold_arxiv_ids:
+  - '2311.17035'
+  - '2505.12546'
+  - '2012.07805'
+  key_facts:
+  - The attack prompts an aligned chat model to repeat a single word indefinitely.
+  - The model diverges from chat behaviour and emits training data verbatim.
+  - Outputs were verified against a large web-scale text index.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 28
+  question: Does training-data deduplication reduce memorization, and by how much?
+  type: factual
+  topic: data_extraction
+  split: dev
+  gold_arxiv_ids:
+  - '2107.06499'
+  - '2202.06539'
+  - '2202.07646'
+  - '2210.17546'
+  key_facts:
+  - Deduplication substantially reduces how often models emit memorized training text.
+  - The likelihood of regenerating a sequence grows strongly with how often it is duplicated.
+  - Deduplication does not remove memorization of unique sequences; verbatim-only metrics can give false privacy.
+  notes: 'orig_tags: prac; facts: memory (verify against papers)'
+- id: 29
+  question: How were training images extracted from diffusion models?
+  type: method
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '2301.13188'
+  - '2212.03860'
+  key_facts:
+  - Images were extracted by generating many images per training caption and finding near-duplicates.
+  - Mostly heavily duplicated training images were extracted.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 30
+  question: How is PII leakage from language models measured, and how effective is scrubbing?
+  type: factual
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '2302.00539'
+  - '2307.01881'
+  - '2502.15680'
+  - '2310.07298'
+  - '2210.17546'
+  key_facts:
+  - PII leakage is measured via extraction, reconstruction, and inference attacks.
+  - Scrubbing reduces but does not eliminate PII leakage.
+  - LLMs can also infer personal attributes from text without memorizing it.
+  notes: 'orig_tags: prac, crit; facts: memory (verify against papers)'
+- id: 31
+  question: What is the Secret Sharer canary/exposure metric, and is it still used?
+  type: method
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '1802.08232'
+  - '2305.08846'
+  - '2302.03098'
+  - '2204.00032'
+  key_facts:
+  - Secret Sharer inserts random canaries into training data.
+  - Exposure measures the canary's rank among all candidate canaries by model likelihood.
+  - Canary insertion remains the basis of modern DP auditing.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 32
+  question: How does Feldman's long-tail theory explain why memorization is needed for generalization?
+  type: method
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '1906.05271'
+  - '2008.03703'
+  - '2206.10469'
+  key_facts:
+  - With long-tailed data, many subpopulations appear only once in the training set.
+  - Feldman proves that near-optimal generalization then requires memorizing such examples.
+  - These memorized long-tail examples are the ones most exposed to privacy attacks.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 33
+  question: Can machine unlearning reliably remove memorized data, and how is that verified?
+  type: factual
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '1912.03817'
+  - '2110.11891'
+  - '2403.01218'
+  - '2406.17216'
+  - '2412.06966'
+  - '2407.06460'
+  - '2401.06121'
+  - '2409.18025'
+  - '2501.04952'
+  key_facts:
+  - Exact unlearning (e.g. SISA sharding) retrains the affected parts and is provably correct but costly.
+  - Approximate unlearning methods often fail to remove the influence of data (e.g. poisons).
+  - Verifying unlearning is hard; approximate unlearning can give a false sense of privacy.
+  notes: 'orig_tags: sota, crit; facts: memory (verify against papers); Must be presented as unsettled.'
+- id: 34
+  question: How does classic model inversion (Fredrikson et al.) differ from GAN-based attacks (GMI, KED-MI, PLG-MI)?
+  type: comparison
+  topic: model_inversion
+  split: test
+  gold_arxiv_ids:
+  - '1911.07135'
+  - '2010.04092'
+  - '2302.09814'
+  - '2201.12179'
+  - '2201.10787'
+  - '2402.04013'
+  key_facts:
+  - Fredrikson et al. optimize inputs directly using model confidence values.
+  - GMI optimizes in the latent space of a GAN trained on public data.
+  - KED-MI trains an inversion-specific GAN using knowledge from the target model.
+  - PLG-MI uses pseudo-labels to guide a conditional GAN.
+  notes: 'orig_tags: comp; facts: memory (verify against papers); Fredrikson 2014/2015 are not in the corpus.'
+- id: 35
+  question: How do model inversion, attribute inference, and membership inference relate to each other?
+  type: method
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '1709.01604'
+  - '2209.01292'
+  - '2212.10986'
+  key_facts:
+  - Membership inference asks whether a record was in the training set.
+  - Attribute inference recovers a sensitive attribute of a known record; model inversion reconstructs representative or specific inputs.
+  - Attribute inference often performs no better than imputation from the data distribution alone.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 36
+  question: How realistic is gradient inversion in federated learning (DLG, Geiping et al.) at large batch sizes?
+  type: factual
+  topic: model_inversion
+  split: test
+  gold_arxiv_ids:
+  - '1906.08935'
+  - '2003.14053'
+  - '2104.07586'
+  - '2110.13057'
+  - '2112.00059'
+  key_facts:
+  - DLG reconstructs inputs by matching dummy gradients to observed gradients.
+  - Inversion quality degrades with batch size and realistic training settings.
+  - A malicious server that modifies the model architecture can reconstruct data even with large batches.
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 37
+  question: Can training data be reconstructed directly from trained weights (informed-adversary reconstruction)?
+  type: method
+  topic: model_inversion
+  split: test
+  gold_arxiv_ids:
+  - '2201.04845'
+  - '2206.07758'
+  - '2307.01827'
+  key_facts:
+  - Balle et al. assume an informed adversary who knows all training points except one.
+  - Haim et al. reconstruct training samples from trained networks via the implicit bias of gradient descent.
+  - Both results require strong assumptions or small models.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 38
+  question: How effective are defenses against model inversion attacks?
+  type: factual
+  topic: model_inversion
+  split: dev
+  gold_arxiv_ids:
+  - '2009.05241'
+  - '2206.05483'
+  - '2310.06549'
+  - '2302.09814'
+  - '2402.04013'
+  key_facts:
+  - Defenses such as MID and BiDO reduce dependence between inputs and representations.
+  - They give partial protection at a utility cost and are weakened by newer attacks.
+  - Label smoothing with negative factors can reduce model inversion vulnerability.
+  notes: 'orig_tags: crit; facts: memory (verify against papers)'
+- id: 39
+  question: How do embedding inversion attacks (e.g., vec2text) work, and what do they mean for RAG systems?
+  type: method
+  topic: model_inversion
+  split: dev
+  gold_arxiv_ids:
+  - '2004.00053'
+  - '2305.03010'
+  - '2310.06816'
+  - '2507.07700'
+  - '2402.16893'
+  key_facts:
+  - vec2text iteratively corrects a text hypothesis so that its embedding approaches the target embedding.
+  - vec2text recovers 92% of 32-token inputs exactly (BLEU 97.3 on GTR-base).
+  - It recovers 89% of full names from embedded clinical notes (MIMIC-III).
+  - Embeddings in RAG vector stores should be protected like plaintext.
+  notes: 'orig_tags: def, prac; facts: checked'
+- id: 40
+  question: How does DP bound reconstruction risk, compared with its bounds on membership inference?
+  type: method
+  topic: model_inversion
+  split: test
+  gold_arxiv_ids:
+  - '2201.12383'
+  - '2302.07225'
+  - '2307.03928'
+  - '2202.07623'
+  - '2507.06969'
+  - '2609.37344'
+  key_facts:
+  - Reconstruction is a harder task than membership inference.
+  - A given epsilon bounds reconstruction success more strongly than membership inference success.
+  - DP models can therefore protect against reconstruction at epsilon values too large for meaningful MIA protection.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 41
+  question: What is the difference between direct prompt injection, indirect prompt injection, and jailbreaks?
+  type: method
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2211.09527'
+  - '2302.12173'
+  - '2307.02483'
+  - '2308.03825'
+  - '2310.12815'
+  - '2402.00898'
+  key_facts:
+  - 'Direct prompt injection: the user inserts instructions to override the application''s prompt.'
+  - 'Indirect prompt injection: instructions arrive through third-party data the model processes (web pages, emails, tool outputs).'
+  - Jailbreaks aim to bypass safety training, not to hijack an application's task.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 42
+  question: How did Greshake et al. demonstrate indirect prompt injection in LLM-integrated applications?
+  type: method
+  topic: prompt_injection
+  split: dev
+  gold_arxiv_ids:
+  - '2302.12173'
+  - '2306.05499'
+  key_facts:
+  - Greshake et al. placed instructions in content retrieved by LLM-integrated applications.
+  - They demonstrated attacks on real systems such as Bing Chat.
+  - Impacts included data theft, manipulation of outputs, and spreading injections.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 43
+  question: What do AgentDojo, InjecAgent, and BIPIA measure, and how do they differ?
+  type: comparison
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2406.13352'
+  - '2403.02691'
+  - '2312.14197'
+  - '2310.12815'
+  key_facts:
+  - AgentDojo is a dynamic agent environment measuring both task utility and security under injections.
+  - InjecAgent tests indirect injections through tool outputs in tool-using agents.
+  - BIPIA benchmarks indirect injections in text tasks such as email and QA.
+  notes: 'orig_tags: comp; facts: memory (verify against papers)'
+- id: 44
+  question: How effective are training-time defenses (StruQ, SecAlign, instruction hierarchy) against adaptive attacks?
+  type: factual
+  topic: prompt_injection
+  split: dev
+  gold_arxiv_ids:
+  - '2402.06363'
+  - '2410.05451'
+  - '2404.13208'
+  - '2507.02735'
+  - '2510.09023'
+  - '2503.00061'
+  key_facts:
+  - StruQ separates instructions and data with reserved delimiters and structured instruction tuning.
+  - SecAlign uses preference optimization to prefer responses that ignore injected instructions.
+  - Instruction hierarchy trains models to prioritize system over user over tool content.
+  - An adaptive evaluation bypassed 12 recent defenses with attack success above 90% for most, although most originally reported near-zero success.
+  notes: 'orig_tags: sota, crit; facts: partial (numbers checked, rest from memory)'
+- id: 45
+  question: How do system-level defenses (CaMeL, dual-LLM pattern, spotlighting) work, and what are their trade-offs?
+  type: comparison
+  topic: prompt_injection
+  split: dev
+  gold_arxiv_ids:
+  - '2503.18813'
+  - '2403.14720'
+  - '2506.08837'
+  key_facts:
+  - CaMeL separates control flow (privileged LLM) from untrusted data (quarantined LLM) and enforces capability-based policies.
+  - The dual-LLM pattern keeps untrusted content away from the LLM that can call tools.
+  - Spotlighting marks untrusted input (delimiting, datamarking, encoding); it is cheap but not robust to adaptive attacks.
+  - Isolation-based designs give principled guarantees at a utility cost.
+  notes: 'orig_tags: comp; facts: memory (verify against papers); Dual-LLM pattern (Willison blog) is not in the corpus.'
+- id: 46
+  question: Why do detection-based defenses (perplexity filters, classifiers) fail against adaptive attacks?
+  type: factual
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2309.00614'
+  - '2308.14132'
+  - '2406.00799'
+  - '2504.11358'
+  - '2510.09023'
+  - '2503.00061'
+  key_facts:
+  - Perplexity filters are evaded by fluent, natural-language injections.
+  - Classifier detectors fail once the attacker optimizes against the detector.
+  - Adaptive attacks bypass most published detection defenses.
+  notes: 'orig_tags: crit; facts: partial (numbers checked, rest from memory)'
+- id: 47
+  question: How do optimization-based prompt injection attacks work?
+  type: method
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2307.15043'
+  - '2403.04957'
+  - '2403.03792'
+  - '2410.14923'
+  key_facts:
+  - GCG uses greedy coordinate gradient search over tokens to find adversarial suffixes.
+  - Such suffixes can be universal and transfer between models.
+  - The same optimization is applied to craft universal prompt-injection payloads.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 48
+  question: How does poisoning the retrieval corpus of a RAG system work (e.g., PoisonedRAG)?
+  type: method
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2402.07867'
+  - '2310.19156'
+  - '2302.12173'
+  - '2302.10149'
+  key_facts:
+  - PoisonedRAG injects a few crafted texts into the knowledge base for chosen target questions.
+  - The texts are designed to be retrieved for the target query and to steer the generated answer.
+  - Poisoning web-scale data sources is practical (e.g. expired domains, snapshot timing).
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 49
+  question: How can prompt injection be used to exfiltrate data from agents?
+  type: method
+  topic: prompt_injection
+  split: dev
+  gold_arxiv_ids:
+  - '2302.12173'
+  - '2410.14923'
+  - '2406.13352'
+  - '2409.11295'
+  - '2503.18813'
+  key_facts:
+  - Injected instructions can make agents encode private data in URLs, e.g. markdown image links.
+  - Tool calls (e.g. sending emails, web requests) are another exfiltration channel.
+  - Isolation designs such as CaMeL restrict data flow to untrusted sinks.
+  notes: 'orig_tags: def, prac; facts: memory (verify against papers)'
+- id: 50
+  question: What is the hierarchy of privacy attacks (membership → attribute → reconstruction), and what does DP guarantee at each level?
+  type: method
+  topic: model_inversion
+  split: test
+  gold_arxiv_ids:
+  - '2212.10986'
+  - '1709.01604'
+  - '2201.12383'
+  - '2302.07225'
+  - '2507.06969'
+  key_facts:
+  - Attack difficulty roughly increases from membership inference to attribute inference to reconstruction.
+  - DP bounds the success of all of them.
+  - A given epsilon gives stronger protection against harder attacks such as reconstruction.
+  notes: 'orig_tags: def; facts: memory (verify against papers)'
+- id: 51
+  question: Which threat-model assumptions must be stated explicitly in an MIA or extraction paper?
+  type: factual
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2212.10986'
+  - '2406.17975'
+  - '2404.17399'
+  - '2112.03570'
+  - '2005.10881'
+  - '2409.19798'
+  - '2505.01524'
+  - '2103.07853'
+  key_facts:
+  - 'State the access model: black-box, white-box, label-only, or no-box.'
+  - State the attacker's reference/shadow data and its distribution relative to the training data.
+  - State the member prior, how targets are chosen, and how non-members are sampled.
+  - Report TPR at low FPR.
+  notes: 'orig_tags: prac; facts: memory (verify against papers)'
+- id: 52
+  question: What are the most important open problems in ML privacy and security right now?
+  type: factual
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2406.17975'
+  - '2412.06966'
+  - '2501.04952'
+  - '2510.09023'
+  - '2212.06470'
+  - '2603.22987'
+  - '2404.09932'
+  - '2510.15476'
+  - '2602.10453'
+  key_facts:
+  - MIA evaluation for LLMs lacks reliable benchmarks without distribution shift.
+  - Verifiable unlearning remains unsolved.
+  - Prompt-injection defenses that survive adaptive attacks remain open.
+  - Auditing DP under realistic threat models (final model only) is not fully understood.
+  notes: 'orig_tags: sota; facts: memory (verify against papers); Opinion-heavy; answer should mark views as such.'
+- id: 53
+  question: How does model stealing work, i.e., extracting a model's weights or functionality via API queries?
+  type: out_of_scope
+  topic: out_of_scope
+  split: test
+  gold_arxiv_ids: []
+  key_facts:
+  - The corpus covers training-data extraction, not model stealing.
+  - The answer should say it cannot cover model stealing from this corpus.
+  notes: 'orig_tags: oos; facts: memory (verify against papers); subtype: oos (name collision ''extraction'').'
+- id: 54
+  question: Why did Carlini et al. (2021) conclude that DP-SGD prevents training data extraction from GPT-2?
+  type: out_of_scope
+  topic: out_of_scope
+  split: dev
+  gold_arxiv_ids:
+  - '2012.07805'
+  key_facts:
+  - GPT-2 was not trained with DP-SGD.
+  - Carlini et al. (2021) did not experimentally show that DP-SGD prevents extraction; DP appears only as a discussed mitigation.
+  - The answer must correct the premise.
+  notes: 'orig_tags: false_premise; facts: memory (verify against papers); subtype: false_premise.'
+- id: 55
+  question: What epsilon was GPT-4 trained with?
+  type: out_of_scope
+  topic: out_of_scope
+  split: test
+  gold_arxiv_ids: []
+  key_facts:
+  - The training epsilon of GPT-4 is not public.
+  - Nothing in the corpus indicates GPT-4 was trained with DP.
+  - The answer must not give a number.
+  notes: 'orig_tags: unanswerable; facts: memory (verify against papers); subtype: unanswerable.'
+- id: 56
+  question: How does the 'ShadowLens' membership inference attack outperform LiRA?
+  type: out_of_scope
+  topic: out_of_scope
+  split: test
+  gold_arxiv_ids: []
+  key_facts:
+  - No method called ShadowLens exists in the corpus.
+  - The answer must not invent a mechanism or citation.
+  notes: 'orig_tags: fabricated; facts: memory (verify against papers); subtype: fabricated. Confirm on arXiv that the name is not a real paper before use.'
+- id: 57
+  question: How do BadNets-style backdoors in image classifiers work, and how are they detected?
+  type: out_of_scope
+  topic: out_of_scope
+  split: dev
+  gold_arxiv_ids:
+  - '2402.07867'
+  - '2302.10149'
+  key_facts:
+  - Backdoor attacks on image classifiers are not covered by the corpus.
+  - Retrieval-corpus and web-scale poisoning are related but different topics.
+  notes: 'orig_tags: oos; facts: memory (verify against papers); subtype: oos (adjacent). Gold IDs are allowed, not required.'
+- id: 58
+  question: Compare LiRA, RMIA, and quantile-regression MIA on compute cost (number of reference models) and TPR at low FPR.
+  type: comparison
+  topic: membership_inference
+  split: test
+  gold_arxiv_ids:
+  - '2112.03570'
+  - '2312.03262'
+  - '2307.03694'
+  key_facts:
+  - LiRA needs many shadow/reference models for best performance (online variant).
+  - RMIA is strong with 1-2 reference models.
+  - Quantile-regression MIA trains a single quantile model instead of many shadow models.
+  - Each result must be attributed to the correct paper.
+  notes: 'orig_tags: comp_multi; facts: partial (numbers checked, rest from memory)'
+- id: 59
+  question: Duan et al. and Das et al. both criticize LLM MIA benchmarks. How do their evidence and conclusions differ, and does the strong-MIA result of Hayes et al. (2025) contradict them?
+  type: comparison
+  topic: membership_inference
+  split: dev
+  gold_arxiv_ids:
+  - '2402.07841'
+  - '2406.16201'
+  - '2505.18773'
+  key_facts:
+  - 'Duan et al.: near-random MIA performance on Pythia with IID splits; benchmark successes come from distribution shift.'
+  - 'Das et al.: blind baselines without model access beat published MIAs on common benchmarks.'
+  - Hayes et al. (2025) use strong reference-model attacks; the answer must not invent a contradiction without checking what they claim.
+  notes: 'orig_tags: comp_multi, crit; facts: partial (numbers checked, rest from memory); Tests reconciliation of seemingly conflicting results.'
+- id: 60
+  question: Compare the GPT-2 extraction attack (Carlini et al. 2021) with the divergence attack (Nasr et al. 2023) on threat model, target model (base vs. aligned), and amount of data extracted.
+  type: comparison
+  topic: data_extraction
+  split: test
+  gold_arxiv_ids:
+  - '2012.07805'
+  - '2311.17035'
+  key_facts:
+  - Carlini et al. attacked base GPT-2 by sampling and ranking generations.
+  - Nasr et al. attacked aligned production models (ChatGPT) with the divergence (repeated-word) prompt.
+  - Nasr et al. extracted far more memorized data than the GPT-2 attack.
+  - Numbers and threat models must not be swapped between papers.
+  notes: 'orig_tags: comp_multi; facts: memory (verify against papers)'
+- id: 61
+  question: How do the security claims of StruQ, SecAlign, and CaMeL differ, and how do they hold up in the adaptive evaluations of 2510.09023 and 2503.00061?
+  type: comparison
+  topic: prompt_injection
+  split: test
+  gold_arxiv_ids:
+  - '2402.06363'
+  - '2410.05451'
+  - '2503.18813'
+  - '2510.09023'
+  - '2503.00061'
+  key_facts:
+  - StruQ and SecAlign are training-time defenses with empirical security claims.
+  - CaMeL is a system-level design with guarantees from separating control and data flow.
+  - Adaptive evaluations report training-time defenses as bypassed.
+  - The answer must claim a defense was tested only if the cited evaluation actually tests it.
+  notes: 'orig_tags: comp_multi, crit; facts: partial (numbers checked, rest from memory); Unclear whether 2510.09023 evaluates CaMeL.'
+- id: 62
+  question: Compare one-run auditing (Steinke et al. 2023) with multi-run tight auditing (Nasr et al. 2023) on cost, tightness, and threat model.
+  type: comparison
+  topic: differential_privacy
+  split: test
+  gold_arxiv_ids:
+  - '2305.08846'
+  - '2302.07956'
+  - '2410.22235'
+  key_facts:
+  - Steinke et al. audit with a single training run containing many canaries.
+  - Nasr et al. (2023) use many training runs and achieve nearly tight bounds.
+  - One-run audits are much cheaper but give looser bounds.
+  - f-DP-based one-run auditing tightens the one-run bounds.
+  notes: 'orig_tags: comp_multi; facts: memory (verify against papers)'

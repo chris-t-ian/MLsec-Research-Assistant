@@ -1,0 +1,29 @@
+{
+  "run_id": "20261123-073127",
+  "created_at": "2026-11-23T07:31:27+00:00",
+  "split": "dev",
+  "final": false,
+  "strategies": [
+    "hybrid"
+  ],
+  "verification_modes": [
+    "off",
+    "flag",
+    "regenerate"
+  ],
+  "question_ids": [
+    "2",
+    "5"
+  ],
+  "main_model": "anthropic/claude-sonnet-5.5",
+  "judge_model": "google/gemini-3.8-flash",
+  "temperature": 0.0,
+  "k": 8,
+  "seed": 0,
+  "n_resamples": 10000,
+  "git_commit": "22a95ffbb3bd7cf47b01852b5f27709d54a65343",
+  "git_dirty": true,
+  "gold_file": "eval/gold_questions.yaml",
+  "gold_sha256": "d411e0ecc0ed62fb50cadc9f62c105b3d02b88b046a81f80b11293a4473a5981",
+  "notes": []
+}

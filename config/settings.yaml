@@ -3,23 +3,38 @@
 
 models:
   main: anthropic/claude-sonnet-5.5
-  judge: google/gemini-3.5-flash
+  judge: google/gemini-3.8-flash
   fallback: openai/gpt-4.1-mini
+  # Additional models offered in the UI model setting (main and fallback are always offered).
+  selectable: []
+  # Query rewriter for retrieval-only tuning (eval/tune_retrieval.py); judge if unset.
+  retrieval_tuning: anthropic/claude-haiku-4.5
+  # Independent claim judge for eval/run_eval.py: re-checks the final answer of every arm, so
+  # verification modes are not scored by the verifier they use (judge). A different model
+  # family than main (writer) and judge (verifier). Remove to score with the verifier.
+  eval_judge: openai/gpt-4.1-mini
 
 llm:
   base_url: https://openrouter.ai/api/v1
   timeout_s: 60
   max_retries: 3
   temperature: 0.0
+  max_tokens: 8192      # output cap per call; also caps OpenRouter's per-request credit reservation
+  prompt_cache: true    # automatic prompt caching in the agent tool loop (anthropic/* models)
 
 paths:
   raw_dir: data/raw
   index_dir: data/index
   papers_file: data/papers.yaml
   processed_dir: data/processed
+  strategies_file: config/strategies.yaml
+  cache_dir: data/cache
+  audit_log: data/logs/tool_audit.jsonl
+  chat_db: data/chainlit.db  # Chainlit chat history (create with scripts/init_db.py)
 
 limits:
   max_question_chars: 2000
+  messages_per_minute: 20   # per chat session, sliding 60 s window
 
 retrieval:
   top_k: 8
@@ -31,6 +46,12 @@ retrieval:
   query_instruction: "Represent this sentence for searching relevant passages: "
   embedding_batch_size: 32
   collection_name: chunks
+  # Cross-encoder for strategies with rerank: true (see config/strategies.yaml).
+  reranker_model: BAAI/bge-reranker-base
+  # Reranker input length in tokens (query + chunk); 256 keeps CPU reranking affordable.
+  reranker_max_length: 256
+  reranker_batch_size: 16
+  rrf_k: 60
 
 chunking:
   # Sizes in tokens; tiktoken cl100k_base is used as an approximation for all models.
@@ -48,6 +69,50 @@ arxiv:
   backoff_s: 3
   max_download_mb: 100
   max_extract_mb: 500
+
+semantic_scholar:
+  api_url: https://api.semanticscholar.org/graph/v1
+  timeout_s: 30
+  max_retries: 4
+  backoff_s: 2          # exponential backoff base on 429 / 5xx / timeouts
+  min_interval_s: 1.0   # keyed access: 1 request per second
+  cache_ttl_h: 24       # citation_graph disk cache lifetime
+
+generation:
+  # Spotlighting: sources are always wrapped in delimiters with a random per-request boundary.
+  # datamarking: true additionally interleaves datamark_char into the source text (red-team
+  # comparison); default "ˆ" (U+02C6).
+  datamarking: false
+  datamark_char: "\u02C6"
+  excerpt_chars: 300
+
+agent:
+  # Strategy name from config/strategies.yaml used by search_knowledge_base (rerank
+  # strategies are slow on CPU, see retrieval.reranker_model).
+  default_strategy: baseline_dense_tuned  # dense, top_k 12, max 2 chunks per paper
+  history_turns: 6            # completed earlier turns passed to the model
+  max_tool_calls_per_turn: 6  # hard cap (validated <= 6)
+  max_agent_steps: 6          # agent model calls per turn
+  max_tool_result_chars: 6000
+
+verification:
+  # Claim check after every answer (judge model, temperature 0):
+  #   off | flag (badges only) | remove (drop unsupported sentences) | regenerate (one retry)
+  policy: flag
+  batch_size: 10        # claims per judge call
+  context_chars: 300    # chunk text shown around an evidence span in the UI
+  max_chunk_chars: 6000 # characters of one cited chunk given to the judge
+
+security:
+  max_token_chars: 200        # reject single whitespace-free tokens longer than this
+  injection:
+    warn_threshold: 0.4
+    block_threshold: 0.8
+    # Optional classifier on top of the heuristics (Apache-2.0, not gated; checked
+    # 2026-11-21 on huggingface.co). Downloaded on first use.
+    classifier_enabled: false
+    classifier_model: protectai/deberta-v3-base-prompt-injection-v2
+    classifier_max_length: 512
 
 logging:
   level: INFO

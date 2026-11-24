@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import (
@@ -25,6 +26,17 @@ class ModelsConfig(BaseModel):
     main: str
     judge: str
     fallback: str
+    # Extra models a user may pick for answering (UI model setting), besides main and fallback.
+    selectable: list[str] = Field(default_factory=list)
+    # Query rewriter for eval/tune_retrieval.py (query translation, self-query); judge if unset.
+    retrieval_tuning: str | None = None
+    # Independent claim judge for eval/run_eval.py: re-checks the final answers of every arm
+    # with a model other than the verifier (judge). Unset: the verifier's own checks are used.
+    eval_judge: str | None = None
+
+    def choices(self) -> list[str]:
+        """Models a session may answer with: main first, then fallback and ``selectable``."""
+        return list(dict.fromkeys([self.main, self.fallback, *self.selectable]))
 
 
 class LLMConfig(BaseModel):
@@ -32,6 +44,18 @@ class LLMConfig(BaseModel):
     timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(
+        default=8192,
+        gt=0,
+        description="Output cap per call. OpenRouter reserves credit for this many output "
+        "tokens before each request, so an unset cap (provider maximum) blocks calls on a "
+        "low balance.",
+    )
+    prompt_cache: bool = Field(
+        default=True,
+        description="Ask Anthropic models for automatic prompt caching: repeated prompt "
+        "prefixes (system prompt, earlier tool results) are billed at the cache-read rate.",
+    )
 
 
 class PathsConfig(BaseModel):
@@ -39,6 +63,12 @@ class PathsConfig(BaseModel):
     index_dir: Path = Path("data/index")
     papers_file: Path = Path("data/papers.yaml")
     processed_dir: Path = Path("data/processed")
+    strategies_file: Path = Path("config/strategies.yaml")
+    cache_dir: Path = Path("data/cache")
+    # JSONL audit log of every agent tool call (see research_assistant.security.tool_policy).
+    audit_log: Path = Path("data/logs/tool_audit.jsonl")
+    # SQLite database of the Chainlit chat history (schema: research_assistant.persistence).
+    chat_db: Path = Path("data/chainlit.db")
 
     def resolve(self, root: Path = PROJECT_ROOT) -> PathsConfig:
         """Return a copy with relative paths anchored at the project root."""
@@ -51,6 +81,10 @@ class PathsConfig(BaseModel):
             index_dir=_abs(self.index_dir),
             papers_file=_abs(self.papers_file),
             processed_dir=_abs(self.processed_dir),
+            strategies_file=_abs(self.strategies_file),
+            cache_dir=_abs(self.cache_dir),
+            audit_log=_abs(self.audit_log),
+            chat_db=_abs(self.chat_db),
         )
 
 
@@ -68,8 +102,21 @@ class ArxivConfig(BaseModel):
     user_agent: str = "research-assistant-corpus/0.1"
 
 
+class SemanticScholarConfig(BaseModel):
+    api_url: str = "https://api.semanticscholar.org/graph/v1"
+    timeout_s: float = Field(default=30.0, gt=0)
+    max_retries: int = Field(default=4, ge=0)
+    backoff_s: float = Field(default=2.0, ge=0)
+    # Keyed access is limited to 1 request/s; unauthenticated traffic shares a global pool.
+    min_interval_s: float = Field(default=1.0, ge=0)
+    cache_ttl_h: float = Field(default=24.0, ge=0)
+    user_agent: str = "research-assistant/0.1"
+
+
 class LimitsConfig(BaseModel):
     max_question_chars: int = Field(default=2000, gt=0)
+    # Per chat session, sliding 60 s window (research_assistant.security.rate_limit).
+    messages_per_minute: int = Field(default=20, ge=1, le=1000)
 
 
 class RetrievalConfig(BaseModel):
@@ -82,6 +129,12 @@ class RetrievalConfig(BaseModel):
     query_instruction: str = "Represent this sentence for searching relevant passages: "
     embedding_batch_size: int = Field(default=32, gt=0)
     collection_name: str = "chunks"
+    # Cross-encoder used by strategies with ``rerank: true``.
+    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_max_length: int = Field(default=256, gt=0)
+    reranker_batch_size: int = Field(default=16, gt=0)
+    # Reciprocal Rank Fusion constant: score = sum 1 / (rrf_k + rank).
+    rrf_k: int = Field(default=60, gt=0)
 
 
 class ChunkingConfig(BaseModel):
@@ -96,6 +149,68 @@ class ChunkingConfig(BaseModel):
         if self.overlap_tokens >= self.max_tokens:
             raise ValueError("overlap_tokens must be smaller than max_tokens")
         return self
+
+
+class GenerationConfig(BaseModel):
+    """Cited answer generation (see research_assistant.generation)."""
+
+    # Spotlighting by datamarking (Hines et al. 2024): additionally replace every whitespace
+    # run in source text with ``datamark_char``. Delimiters with a random boundary are always on.
+    datamarking: bool = False
+    datamark_char: str = Field(default=chr(0x02C6), min_length=1, max_length=1)
+    # Length of the source excerpt stored on each Citation.
+    excerpt_chars: int = Field(default=300, gt=0)
+
+
+class AgentConfig(BaseModel):
+    """LangGraph agent (see research_assistant.agent.graph)."""
+
+    default_strategy: str = Field(default="hybrid", pattern=r"^[a-z0-9_]+$")
+    # Completed earlier turns (question + final answer) passed to the model.
+    history_turns: int = Field(default=6, ge=0, le=50)
+    # Hard cap per turn; the policy never allows more than this many tool calls.
+    max_tool_calls_per_turn: int = Field(default=6, ge=1, le=6)
+    # Agent model calls per turn (each may request several tool calls).
+    max_agent_steps: int = Field(default=6, ge=1, le=20)
+    # Characters of one tool result shown to the model (JSON, spotlighted).
+    max_tool_result_chars: int = Field(default=6000, gt=0)
+
+
+class VerificationConfig(BaseModel):
+    """Claim verification after answer generation (see research_assistant.verification)."""
+
+    # off: no check; flag: mark claims only; remove: drop unsupported sentences and say so;
+    # regenerate: one retry with the list of unsupported claims (then flag what remains).
+    policy: Literal["off", "flag", "remove", "regenerate"] = "flag"
+    # Claims per judge call (one structured call per batch).
+    batch_size: int = Field(default=10, ge=1, le=25)
+    # Characters of chunk text kept on each side of an evidence span (UI highlighting).
+    context_chars: int = Field(default=300, ge=0, le=2000)
+    # Characters of one cited chunk shown to the judge.
+    max_chunk_chars: int = Field(default=6000, gt=0)
+
+
+class InjectionConfig(BaseModel):
+    """Prompt-injection detection on user input."""
+
+    warn_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    block_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    # Optional Hugging Face classifier (Apache-2.0, downloaded on first use).
+    classifier_enabled: bool = False
+    classifier_model: str = "protectai/deberta-v3-base-prompt-injection-v2"
+    classifier_max_length: int = Field(default=512, gt=0)
+
+    @model_validator(mode="after")
+    def _check_thresholds(self) -> InjectionConfig:
+        if self.warn_threshold > self.block_threshold:
+            raise ValueError("warn_threshold must not exceed block_threshold")
+        return self
+
+
+class SecurityConfig(BaseModel):
+    injection: InjectionConfig = InjectionConfig()
+    # Single whitespace-free tokens longer than this are rejected (obfuscation, payloads).
+    max_token_chars: int = Field(default=200, gt=0)
 
 
 class LoggingConfig(BaseModel):
@@ -116,6 +231,11 @@ class Settings(BaseSettings):
     # Secrets (from environment / .env only).
     openrouter_api_key: SecretStr | None = None
     semantic_scholar_api_key: SecretStr | None = None
+    # Single demo login of the web UI (chat history needs authentication).
+    demo_username: str | None = None
+    demo_password: SecretStr | None = None
+    # Signs Chainlit session tokens (read by Chainlit itself; here only checked at startup).
+    chainlit_auth_secret: SecretStr | None = None
 
     # Non-secret config (from settings.yaml).
     models: ModelsConfig
@@ -125,6 +245,11 @@ class Settings(BaseSettings):
     retrieval: RetrievalConfig = RetrievalConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     arxiv: ArxivConfig = ArxivConfig()
+    semantic_scholar: SemanticScholarConfig = SemanticScholarConfig()
+    generation: GenerationConfig = GenerationConfig()
+    agent: AgentConfig = AgentConfig()
+    verification: VerificationConfig = VerificationConfig()
+    security: SecurityConfig = SecurityConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
@@ -148,13 +273,30 @@ class ConfigError(RuntimeError):
     """Raised when configuration is missing or invalid."""
 
 
+MAX_CONFIG_ERRORS = 10
+
+
+def describe_validation_error(exc: ValidationError) -> str:
+    """Readable summary of a settings ValidationError: one line per field, no input values
+    (they may be secrets)."""
+    lines = [f"Invalid configuration in {SETTINGS_YAML.relative_to(PROJECT_ROOT)} or .env:"]
+    errors = exc.errors(include_url=False, include_input=False, include_context=False)
+    for err in errors[:MAX_CONFIG_ERRORS]:
+        loc = ".".join(str(x) for x in err.get("loc", ())) or "(root)"
+        msg = str(err.get("msg", "invalid value")).removeprefix("Value error, ")
+        lines.append(f"  {loc}: {msg}")
+    if len(errors) > MAX_CONFIG_ERRORS:
+        lines.append(f"  ... and {len(errors) - MAX_CONFIG_ERRORS} more")
+    return "\n".join(lines)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Load settings once per process and configure logging."""
     try:
         settings = Settings()  # type: ignore[call-arg]  # fields come from yaml/env sources
     except ValidationError as exc:
-        raise ConfigError(f"Invalid configuration in {SETTINGS_YAML} or environment") from exc
+        raise ConfigError(describe_validation_error(exc)) from exc
     configure_logging(settings.logging.level)
     return settings
 
@@ -170,5 +312,5 @@ def configure_logging(level: str = "INFO") -> None:
     else:
         root.setLevel(numeric)
     # Keep noisy HTTP client logs (which may include URLs/headers) quiet.
-    for noisy in ("httpx", "httpx2", "httpcore", "openai", "pylatexenc", "pdfminer"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "pylatexenc", "pdfminer", "absl"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

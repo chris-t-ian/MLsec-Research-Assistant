@@ -1,0 +1,1567 @@
+{
+  "run_id": "tuning-20261123-102932",
+  "created_at": "2026-11-23T10:29:32+00:00",
+  "split": "dev",
+  "question_ids": [
+    "2",
+    "5",
+    "7",
+    "12",
+    "15",
+    "16",
+    "17",
+    "24",
+    "26",
+    "27",
+    "28",
+    "38",
+    "39",
+    "42",
+    "44",
+    "45",
+    "49",
+    "54",
+    "57",
+    "59"
+  ],
+  "strategies": [
+    "baseline_dense",
+    "hybrid",
+    "hybrid_multiquery",
+    "hybrid_hyde_rerank",
+    "full"
+  ],
+  "grid": {
+    "top_k": [
+      5,
+      8,
+      12
+    ],
+    "fetch_k": [
+      30,
+      60
+    ],
+    "rerank_k": [
+      15,
+      30
+    ],
+    "max_chunks_per_paper": [
+      2,
+      3
+    ]
+  },
+  "reference": "baseline_dense",
+  "rewriter_model": "anthropic/claude-haiku-4.5",
+  "seed": 0,
+  "n_resamples": 10000,
+  "git_commit": "bdae963b1dee35ddf85d7ac26f5079ae6e73de4e",
+  "git_dirty": true,
+  "gold_file": "eval/gold_questions.yaml",
+  "gold_sha256": "d411e0ecc0ed62fb50cadc9f62c105b3d02b88b046a81f80b11293a4473a5981",
+  "configs": [
+    {
+      "base": "baseline_dense",
+      "params": {},
+      "config": {
+        "name": "baseline_dense",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 5,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__max_chunks_per_paper2__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 5
+      },
+      "config": {
+        "name": "baseline_dense__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60__max_chunks_per_paper2__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__max_chunks_per_paper2",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60__max_chunks_per_paper2",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 12,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__max_chunks_per_paper2__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 12
+      },
+      "config": {
+        "name": "baseline_dense__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60__max_chunks_per_paper2__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "baseline_dense",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "baseline_dense__fetch_k60__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "dense",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {},
+      "config": {
+        "name": "hybrid",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 5,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__max_chunks_per_paper2__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 5
+      },
+      "config": {
+        "name": "hybrid__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__fetch_k60__max_chunks_per_paper2__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid__fetch_k60__top_k5",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__max_chunks_per_paper2",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__fetch_k60__max_chunks_per_paper2",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid__fetch_k60",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 12,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__max_chunks_per_paper2__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 12
+      },
+      "config": {
+        "name": "hybrid__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid__fetch_k60__max_chunks_per_paper2__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid__fetch_k60__top_k12",
+        "query_translation": "none",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {},
+      "config": {
+        "name": "hybrid_multiquery",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 5,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__max_chunks_per_paper2__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 5
+      },
+      "config": {
+        "name": "hybrid_multiquery__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60__max_chunks_per_paper2__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__max_chunks_per_paper2",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60__max_chunks_per_paper2",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 12,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__max_chunks_per_paper2__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 12
+      },
+      "config": {
+        "name": "hybrid_multiquery__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60__max_chunks_per_paper2__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_multiquery",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_multiquery__fetch_k60__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": false,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {},
+      "config": {
+        "name": "hybrid_hyde_rerank",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2__rerank_k30__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__rerank_k30__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2__rerank_k30__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__rerank_k30__top_k5",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2__rerank_k30",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__rerank_k30",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2__rerank_k30",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__rerank_k30",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__max_chunks_per_paper2__rerank_k30__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__rerank_k30__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__max_chunks_per_paper2__rerank_k30__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "hybrid_hyde_rerank",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "hybrid_hyde_rerank__fetch_k60__rerank_k30__top_k12",
+        "query_translation": "hyde",
+        "use_filters": false,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {},
+      "config": {
+        "name": "full",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5
+      },
+      "config": {
+        "name": "full__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2__rerank_k30__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__rerank_k30__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "full__fetch_k60__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2__rerank_k30__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 5,
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__fetch_k60__rerank_k30__top_k5",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 5,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2__rerank_k30",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__rerank_k30",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "full__fetch_k60",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2__rerank_k30",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__fetch_k60__rerank_k30",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 8,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12
+      },
+      "config": {
+        "name": "full__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__max_chunks_per_paper2__rerank_k30__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__rerank_k30__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 30,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60
+      },
+      "config": {
+        "name": "full__fetch_k60__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 15,
+        "max_chunks_per_paper": 3
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      },
+      "config": {
+        "name": "full__fetch_k60__max_chunks_per_paper2__rerank_k30__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 2
+      }
+    },
+    {
+      "base": "full",
+      "params": {
+        "top_k": 12,
+        "fetch_k": 60,
+        "rerank_k": 30
+      },
+      "config": {
+        "name": "full__fetch_k60__rerank_k30__top_k12",
+        "query_translation": "multi_query",
+        "use_filters": true,
+        "retriever": "hybrid",
+        "rerank": true,
+        "fetch_k": 60,
+        "top_k": 12,
+        "rerank_k": 30,
+        "max_chunks_per_paper": 3
+      }
+    }
+  ],
+  "skipped": []
+}

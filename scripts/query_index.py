@@ -14,7 +14,7 @@ import sys
 
 from research_assistant.config import ConfigError, get_settings
 from research_assistant.ingest.index import ChunkIndex, ChunkIndexError
-from research_assistant.models import RetrievalResult
+from research_assistant.models import ScoredChunk
 
 SAMPLE_QUERIES = (
     "How does DP-SGD bound the contribution of a single training example?",
@@ -24,7 +24,7 @@ SAMPLE_QUERIES = (
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # chunk text is untrusted
 
 
-def _show(hits: list[RetrievalResult], width: int) -> None:
+def _show(hits: list[ScoredChunk], width: int) -> None:
     for h in hits:
         c = h.chunk
         snippet = _CONTROL.sub(" ", " ".join(c.text.split()))[:width]

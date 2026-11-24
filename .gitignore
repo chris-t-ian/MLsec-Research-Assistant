@@ -8,7 +8,8 @@ data/processed/
 
 # Chainlit
 .files/
-chainlit.db
+.chainlit/translations/
+chainlit.db*
 
 # Python
 __pycache__/
@@ -22,3 +23,9 @@ build/
 
 # OS
 .DS_Store
+
+# Data caches
+data/cache/
+
+# Logs (tool-call audit log)
+data/logs/

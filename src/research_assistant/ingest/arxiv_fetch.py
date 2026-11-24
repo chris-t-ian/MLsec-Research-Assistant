@@ -18,6 +18,7 @@ import logging
 import re
 import shutil
 import tarfile
+import threading
 import time
 import zlib
 from collections.abc import Callable, Iterable
@@ -122,7 +123,11 @@ class EprintResult:
 
 
 class RateLimiter:
-    """Blocks so that consecutive calls to :meth:`wait` are at least ``min_interval_s`` apart."""
+    """Blocks so that consecutive calls to :meth:`wait` are at least ``min_interval_s`` apart.
+
+    Thread-safe: concurrent callers are serialized, so the interval holds process-wide for
+    every request made through the same limiter.
+    """
 
     def __init__(
         self,
@@ -134,15 +139,17 @@ class RateLimiter:
         self._clock = clock
         self._sleep = sleep
         self._last: float | None = None
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        now = self._clock()
-        if self._last is not None:
-            delay = self._last + self._interval - now
-            if delay > 0:
-                self._sleep(delay)
-                now = self._clock()
-        self._last = now
+        with self._lock:
+            now = self._clock()
+            if self._last is not None:
+                delay = self._last + self._interval - now
+                if delay > 0:
+                    self._sleep(delay)
+                    now = self._clock()
+            self._last = now
 
 
 # --------------------------------------------------------------------------- client
@@ -211,6 +218,23 @@ class ArxivClient:
         data = self._get(self._cfg.api_url, {"id_list": arxiv_id, "max_results": "1"})
         return parse_metadata(data, arxiv_id)
 
+    def fetch_metadata_many(self, arxiv_ids: list[str]) -> list[ArxivMetadata]:
+        """Metadata for several IDs in one API request; unknown IDs are simply missing."""
+        if not arxiv_ids:
+            return []
+        params = {"id_list": ",".join(arxiv_ids), "max_results": str(len(arxiv_ids))}
+        return parse_feed(self._get(self._cfg.api_url, params))
+
+    def search(self, search_query: str, max_results: int) -> list[ArxivMetadata]:
+        """Run an arXiv API ``search_query`` (already in arXiv query syntax), by relevance."""
+        params = {
+            "search_query": search_query,
+            "max_results": str(max_results),
+            "sortBy": "relevance",
+            "sortOrder": "descending",
+        }
+        return parse_feed(self._get(self._cfg.api_url, params))
+
     def fetch_eprint(self, versioned_id: str) -> bytes:
         return self._get(f"{self._cfg.eprint_url}/{versioned_id}")
 
@@ -230,30 +254,20 @@ def _text(el: ET.Element | None) -> str | None:
     return " ".join(el.text.split()) or None
 
 
-def parse_metadata(xml_bytes: bytes, requested_id: str) -> ArxivMetadata:
-    """Parse an arXiv API Atom response for a single ID."""
+def _parse_root(xml_bytes: bytes, what: str) -> ET.Element:
     try:
-        root = ET.fromstring(xml_bytes)
+        return ET.fromstring(xml_bytes)
     except ET.ParseError as exc:
-        raise ArxivResponseError(f"Invalid XML from arXiv API for {requested_id}") from exc
+        raise ArxivResponseError(f"Invalid XML from arXiv API for {what}") from exc
 
-    entries = root.findall(f"{_ATOM}entry")
-    if not entries:
-        raise ArxivNotFoundError(f"arXiv has no entry for {requested_id}")
-    entry = entries[0]
+
+def _parse_entry(entry: ET.Element) -> ArxivMetadata | None:
+    """One Atom ``<entry>``; None if it is not a paper (e.g. an API error entry)."""
     entry_id = _text(entry.find(f"{_ATOM}id")) or ""
-    if "/api/errors" in entry_id:
-        summary = _text(entry.find(f"{_ATOM}summary")) or "unknown error"
-        raise ArxivNotFoundError(f"arXiv API error for {requested_id}: {summary}")
     match = _ENTRY_ID_RE.search(entry_id)
     title = _text(entry.find(f"{_ATOM}title"))
-    if match is None or not title:
-        raise ArxivNotFoundError(f"arXiv has no entry for {requested_id}")
-
-    base = match["base"]
-    requested_base = re.sub(r"v\d+$", "", requested_id)
-    if base != requested_base:
-        raise ArxivResponseError(f"arXiv returned {base} when asked for {requested_id}")
+    if "/api/errors" in entry_id or match is None or not title:
+        return None
 
     published = _text(entry.find(f"{_ATOM}published"))
     year = int(published[:4]) if published and published[:4].isdigit() else None
@@ -272,6 +286,7 @@ def parse_metadata(xml_bytes: bytes, requested_id: str) -> ArxivMetadata:
         for a in entry.findall(f"{_ATOM}author")
         if (name := _text(a.find(f"{_ATOM}name"))) is not None
     ]
+    base = match["base"]
     return ArxivMetadata(
         arxiv_id=base,
         version=int(match["version"]),
@@ -282,6 +297,44 @@ def parse_metadata(xml_bytes: bytes, requested_id: str) -> ArxivMetadata:
         categories=categories,
         url=f"https://arxiv.org/abs/{base}v{match['version']}",
     )
+
+
+def parse_metadata(xml_bytes: bytes, requested_id: str) -> ArxivMetadata:
+    """Parse an arXiv API Atom response for a single ID."""
+    root = _parse_root(xml_bytes, requested_id)
+    entries = root.findall(f"{_ATOM}entry")
+    if not entries:
+        raise ArxivNotFoundError(f"arXiv has no entry for {requested_id}")
+    entry = entries[0]
+    entry_id = _text(entry.find(f"{_ATOM}id")) or ""
+    if "/api/errors" in entry_id:
+        summary = _text(entry.find(f"{_ATOM}summary")) or "unknown error"
+        raise ArxivNotFoundError(f"arXiv API error for {requested_id}: {summary}")
+    meta = _parse_entry(entry)
+    if meta is None:
+        raise ArxivNotFoundError(f"arXiv has no entry for {requested_id}")
+    requested_base = re.sub(r"v\d+$", "", requested_id)
+    if meta.arxiv_id != requested_base:
+        raise ArxivResponseError(f"arXiv returned {meta.arxiv_id} when asked for {requested_id}")
+    return meta
+
+
+def parse_feed(xml_bytes: bytes) -> list[ArxivMetadata]:
+    """Parse every paper entry of an arXiv API Atom feed (search or multi-ID lookup).
+
+    An API error entry (e.g. malformed query) raises :class:`ArxivHTTPError`.
+    """
+    root = _parse_root(xml_bytes, "feed")
+    results: list[ArxivMetadata] = []
+    for entry in root.findall(f"{_ATOM}entry"):
+        entry_id = _text(entry.find(f"{_ATOM}id")) or ""
+        if "/api/errors" in entry_id:
+            summary = _text(entry.find(f"{_ATOM}summary")) or "unknown error"
+            raise ArxivHTTPError(f"arXiv API rejected the request: {summary}")
+        meta = _parse_entry(entry)
+        if meta is not None:
+            results.append(meta)
+    return results
 
 
 def _gunzip_limited(data: bytes, max_bytes: int) -> bytes:
@@ -504,5 +557,6 @@ __all__ = [
     "is_valid_arxiv_id",
     "load_complete",
     "load_paper_list",
+    "parse_feed",
     "parse_metadata",
 ]

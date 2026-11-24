@@ -19,16 +19,16 @@ import pickle
 import re
 import shutil
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 import numpy as np
 from rank_bm25 import BM25Okapi
 
 from research_assistant.config import RetrievalConfig
 from research_assistant.ingest.chunking import QUARANTINED
-from research_assistant.models import Chunk, RetrievalResult
+from research_assistant.models import Chunk, ScoredChunk
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,21 @@ def _is_quarantined(chunk: Chunk) -> bool:
     return QUARANTINED in chunk.flags
 
 
+class ChunkMeta(NamedTuple):
+    """Lightweight per-chunk metadata, used for filtering and the index catalog."""
+
+    chunk_id: str
+    arxiv_id: str
+    authors: tuple[str, ...]
+    year: int | None
+    section: str
+    topic: str
+    quarantined: bool
+
+
+ChunkPredicate = Callable[[ChunkMeta], bool]
+
+
 class BM25Store:
     """Tokenized chunks persisted to a pickle of plain builtins; BM25 built lazily."""
 
@@ -170,6 +185,7 @@ class BM25Store:
         self._docs: dict[str, dict[str, Any]] = {}
         self._bm25: BM25Okapi | None = None
         self._ids: list[str] = []
+        self._meta: list[ChunkMeta] | None = None
         self.dirty = False
         if path.exists():
             self._load()
@@ -221,7 +237,25 @@ class BM25Store:
 
     def _invalidate(self) -> None:
         self._bm25 = None
+        self._meta = None
         self.dirty = True
+
+    def metadata(self) -> list[ChunkMeta]:
+        """Metadata of every stored chunk (cached until the next change)."""
+        if self._meta is None:
+            self._meta = [
+                ChunkMeta(
+                    chunk_id=cid,
+                    arxiv_id=d["chunk"]["arxiv_id"],
+                    authors=tuple(d["chunk"].get("authors") or ()),
+                    year=d["chunk"].get("year"),
+                    section=d["chunk"].get("section") or "",
+                    topic=d.get("topic") or "other",
+                    quarantined=bool(d["quarantined"]),
+                )
+                for cid, d in self._docs.items()
+            ]
+        return self._meta
 
     def _model(self) -> BM25Okapi | None:
         if self._bm25 is None and self._docs:
@@ -230,8 +264,13 @@ class BM25Store:
         return self._bm25
 
     def search(
-        self, query: str, k: int, include_quarantined: bool = False
-    ) -> list[RetrievalResult]:
+        self,
+        query: str,
+        k: int,
+        include_quarantined: bool = False,
+        predicate: ChunkPredicate | None = None,
+    ) -> list[ScoredChunk]:
+        """Top-``k`` chunks by BM25. ``predicate`` filters chunks before the top-k cut."""
         model = self._model()
         q = tokenize(query)
         if model is None or not q or k <= 0:
@@ -240,14 +279,18 @@ class BM25Store:
         if not include_quarantined:
             mask = np.array([self._docs[i]["quarantined"] for i in self._ids], dtype=bool)
             scores[mask] = -np.inf
+        if predicate is not None:
+            by_id = {m.chunk_id: m for m in self.metadata()}
+            keep = np.array([predicate(by_id[i]) for i in self._ids], dtype=bool)
+            scores[~keep] = -np.inf
         order = np.argsort(-scores, kind="stable")[:k]
-        results: list[RetrievalResult] = []
+        results: list[ScoredChunk] = []
         for i in order:
             if not np.isfinite(scores[i]) or scores[i] <= 0:
                 break  # no query term in this (or any later) chunk
             chunk = Chunk.model_validate(self._docs[self._ids[i]]["chunk"])
             results.append(
-                RetrievalResult(
+                ScoredChunk(
                     chunk=chunk, score=float(scores[i]), rank=len(results) + 1, source="bm25"
                 )
             )
@@ -409,16 +452,39 @@ class ChunkIndex:
         meta = dict(res["metadatas"][0])  # type: ignore[index]
         return chunk_from_record(chunk_id, res["documents"][0], meta), meta  # type: ignore[index]
 
+    def metadata(self) -> list[ChunkMeta]:
+        """Metadata of every indexed chunk (from the BM25 store; no embeddings loaded)."""
+        return self._bm25.metadata()
+
     def dense_search(
-        self, query: str, k: int, include_quarantined: bool = False
-    ) -> list[RetrievalResult]:
+        self,
+        query: str,
+        k: int,
+        include_quarantined: bool = False,
+        where: dict[str, Any] | None = None,
+        query_is_passage: bool = False,
+    ) -> list[ScoredChunk]:
+        """Top-``k`` chunks by cosine similarity.
+
+        ``where`` is an extra Chroma metadata filter. With ``query_is_passage`` the query is
+        embedded like a document (no query instruction), e.g. a HyDE passage.
+        """
         n = min(k, self.count())
         if n <= 0 or not query.strip():
             return []
+        clauses: list[dict[str, Any]] = [] if include_quarantined else [{"quarantined": False}]
+        if where:
+            clauses.append(where)
+        combined = None if not clauses else clauses[0] if len(clauses) == 1 else {"$and": clauses}
+        vector = (
+            self.embedder.embed_documents([query])[0]
+            if query_is_passage
+            else self.embedder.embed_query(query)
+        )
         res = self._collection.query(
-            query_embeddings=[self.embedder.embed_query(query)],  # type: ignore[arg-type]
+            query_embeddings=[vector],  # type: ignore[arg-type]
             n_results=n,
-            where=None if include_quarantined else {"quarantined": False},
+            where=combined,  # type: ignore[arg-type]
             include=["documents", "metadatas", "distances"],
         )
         ids = res["ids"][0]
@@ -426,7 +492,7 @@ class ChunkIndex:
         metas = res["metadatas"][0]  # type: ignore[index]
         dists = res["distances"][0]  # type: ignore[index]
         return [
-            RetrievalResult(
+            ScoredChunk(
                 chunk=chunk_from_record(cid, doc, dict(meta)),
                 score=1.0 - float(dist),  # cosine similarity
                 rank=rank,
@@ -438,15 +504,21 @@ class ChunkIndex:
         ]
 
     def bm25_search(
-        self, query: str, k: int, include_quarantined: bool = False
-    ) -> list[RetrievalResult]:
-        return self._bm25.search(query, k, include_quarantined)
+        self,
+        query: str,
+        k: int,
+        include_quarantined: bool = False,
+        predicate: ChunkPredicate | None = None,
+    ) -> list[ScoredChunk]:
+        return self._bm25.search(query, k, include_quarantined, predicate)
 
 
 __all__ = [
     "BM25Store",
     "ChunkIndex",
     "ChunkIndexError",
+    "ChunkMeta",
+    "ChunkPredicate",
     "Embedder",
     "SentenceTransformerEmbedder",
     "chunk_from_record",

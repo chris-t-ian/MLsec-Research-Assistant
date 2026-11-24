@@ -39,7 +39,7 @@ from research_assistant.ingest.process import (
     parse_paper,
     write_jsonl,
 )
-from research_assistant.models import Paper, PaperListEntry, Topic
+from research_assistant.models import Finding, Paper, PaperListEntry, Topic
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,9 @@ class IngestResult(BaseModel):
     n_chunks: int = Field(ge=0)
     n_quarantined: int = Field(ge=0)
     n_suspicious: int = Field(ge=0)
+    findings: list[Finding] = Field(
+        default_factory=list, description="Injection-scan findings from the paper source."
+    )
 
 
 def resolve_topic(arxiv_id: str, papers_file: Path, stored: Topic | None) -> Topic:
@@ -209,6 +212,7 @@ def ingest_paper(
         n_chunks=len(chunks),
         n_quarantined=n_quarantined,
         n_suspicious=n_suspicious,
+        findings=findings,
     )
 
 
